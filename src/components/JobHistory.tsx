@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Clock, Play, RefreshCw, Trash2 } from 'lucide-react';
+import { Clock, Play, RefreshCw, Trash2, Youtube } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { JobStatusBadge } from './JobStatus';
 import type { VideoJob } from '@/lib/types';
@@ -14,8 +14,12 @@ interface JobHistoryProps {
 export function JobHistory({ limit }: JobHistoryProps) {
     const isVideoFile = (url: string | null) => {
         if (!url) return false;
-        const lower = url.toLowerCase();
-        return lower.endsWith('.mp4') || lower.endsWith('.webm') || lower.endsWith('.mov');
+        try {
+            const path = new URL(url).pathname.toLowerCase();
+            return path.endsWith('.mp4') || path.endsWith('.webm') || path.endsWith('.mov');
+        } catch {
+            return false;
+        }
     };
     const [jobs, setJobs] = useState<VideoJob[]>([]);
     const [loading, setLoading] = useState(true);
@@ -72,7 +76,7 @@ export function JobHistory({ limit }: JobHistoryProps) {
     }, [limit]);
 
     const handleRefresh = async () => {
-        setLoading(true);
+        // Don't set loading true for background refresh
         setError('');
 
         const supabase = createClient();
@@ -199,6 +203,11 @@ export function JobHistory({ limit }: JobHistoryProps) {
                                         src={job.thumbnail_url}
                                         alt={job.title_text}
                                         className="w-full h-full object-cover"
+                                        onError={(e) => {
+                                            const target = e.target as HTMLImageElement;
+                                            target.style.display = 'none';
+                                            target.parentElement!.innerHTML = '<div class="w-full h-full flex items-center justify-center bg-gray-800 text-xs text-gray-500">Error</div>';
+                                        }}
                                     />
                                 ) : isVideoFile(job.image_url) ? (
                                     <video
@@ -207,6 +216,7 @@ export function JobHistory({ limit }: JobHistoryProps) {
                                         muted
                                         loop
                                         playsInline
+                                        crossOrigin="anonymous"
                                         preload="metadata"
                                         onMouseEnter={(e) => e.currentTarget.play()}
                                         onMouseLeave={(e) => e.currentTarget.pause()}
@@ -250,19 +260,52 @@ export function JobHistory({ limit }: JobHistoryProps) {
                         </div>
                     </Link>
 
-                    {/* Delete button */}
-                    <button
-                        onClick={(e) => handleDelete(e, job.id)}
-                        disabled={deletingId === job.id}
-                        className="absolute top-4 right-4 p-2 rounded-lg bg-error/10 text-error hover:bg-error/20 transition-colors disabled:opacity-50"
-                        title="Delete video"
-                    >
-                        {deletingId === job.id ? (
-                            <RefreshCw className="w-4 h-4 spinner" />
-                        ) : (
-                            <Trash2 className="w-4 h-4" />
+                    {/* Actions */}
+                    <div className="absolute top-4 right-4 flex items-center gap-2">
+                        {job.status === 'done' && (
+                            <button
+                                onClick={async (e) => {
+                                    e.preventDefault();
+                                    e.stopPropagation();
+                                    if (!confirm("Publish this video to YouTube?")) return;
+
+                                    const btn = e.currentTarget;
+                                    btn.disabled = true;
+                                    btn.innerHTML = '...';
+
+                                    try {
+                                        const res = await fetch(`/api/jobs/${job.id}/publish`, { method: 'POST' });
+                                        const data = await res.json();
+                                        if (!res.ok) throw new Error(data.error);
+
+                                        alert(`Published! URL: ${data.url}`);
+                                    } catch (err: any) {
+                                        alert('Upload Failed: ' + err.message);
+                                    } finally {
+                                        btn.disabled = false;
+                                        // Reset icon (rudimentary re-render)
+                                        btn.innerHTML = '<svg class="w-4 h-4" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 17a24.12 24.12 0 0 1 0-10 2 2 0 0 1 1.4-1.4 49.56 49.56 0 0 1 16.2 0A2 2 0 0 1 21.5 7a24.12 24.12 0 0 1 0 10 2 2 0 0 1-1.4 1.4 49.55 49.55 0 0 1-16.2 0A2 2 0 0 1 2.5 17"/><path d="m10 15 5-3-5-3z"/></svg>';
+                                    }
+                                }}
+                                className="p-2 rounded-lg bg-red-600/10 text-red-600 hover:bg-red-600/20 transition-colors disabled:opacity-50"
+                                title="Publish to YouTube"
+                            >
+                                <Youtube className="w-4 h-4" />
+                            </button>
                         )}
-                    </button>
+                        <button
+                            onClick={(e) => handleDelete(e, job.id)}
+                            disabled={deletingId === job.id}
+                            className="p-2 rounded-lg bg-error/10 text-error hover:bg-error/20 transition-colors disabled:opacity-50"
+                            title="Delete video"
+                        >
+                            {deletingId === job.id ? (
+                                <RefreshCw className="w-4 h-4 spinner" />
+                            ) : (
+                                <Trash2 className="w-4 h-4" />
+                            )}
+                        </button>
+                    </div>
                 </div>
             ))}
         </div>

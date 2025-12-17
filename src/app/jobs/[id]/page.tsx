@@ -9,6 +9,14 @@ import { JobStatus } from '@/components/JobStatus';
 import { VideoPlayer } from '@/components/VideoPlayer';
 import type { VideoJob } from '@/lib/types';
 
+// Extend type locally for display purposes if not yet in global types
+interface JobWithMusic extends VideoJob {
+    video_music?: {
+        order_index: number;
+        music_library: { url: string };
+    }[];
+}
+
 export default function JobDetailPage() {
     const params = useParams();
     const router = useRouter();
@@ -20,7 +28,7 @@ export default function JobDetailPage() {
         return lower.endsWith('.mp4') || lower.endsWith('.webm') || lower.endsWith('.mov');
     };
 
-    const [job, setJob] = useState<VideoJob | null>(null);
+    const [job, setJob] = useState<JobWithMusic | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string>('');
 
@@ -30,7 +38,13 @@ export default function JobDetailPage() {
 
             const { data, error } = await supabase
                 .from('video_jobs')
-                .select('*')
+                .select(`
+                    *,
+                    video_music (
+                        order_index,
+                        music_library ( url )
+                    )
+                `)
                 .eq('id', jobId)
                 .single();
 
@@ -176,10 +190,11 @@ export default function JobDetailPage() {
                         />
 
                         {/* Preview of source files */}
+                /* Preview of source files */
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                             <div className="p-4 rounded-xl bg-card border border-border">
                                 <p className="text-sm text-muted mb-3">Source Image</p>
-                                <div className="aspect-video rounded-lg overflow-hidden bg-card-hover">
+                                <div className="aspect-video rounded-lg overflow-hidden bg-card-hover text-center flex items-center justify-center">
                                     {isVideoFile(job.image_url) ? (
                                         <video
                                             src={`${job.image_url}#t=0.1`}
@@ -188,6 +203,7 @@ export default function JobDetailPage() {
                                             muted
                                             loop
                                             playsInline
+                                            crossOrigin="anonymous"
                                             preload="metadata"
                                         />
                                     ) : (
@@ -196,17 +212,33 @@ export default function JobDetailPage() {
                                             src={job.image_url}
                                             alt="Source image"
                                             className="w-full h-full object-cover"
+                                            onError={(e) => {
+                                                const target = e.target as HTMLImageElement;
+                                                target.style.display = 'none';
+                                                target.parentElement!.innerHTML = '<div class="text-xs text-muted">Image Load Error</div>';
+                                            }}
                                         />
                                     )}
                                 </div>
                             </div>
                             <div className="p-4 rounded-xl bg-card border border-border">
-                                <p className="text-sm text-muted mb-3">Audio Track</p>
-                                <audio
-                                    src={job.audio_url}
-                                    controls
-                                    className="w-full"
-                                />
+                                <p className="text-sm text-muted mb-3">Audio Tracks ({job.video_music?.length || 0})</p>
+                                <div className="space-y-2">
+                                    {job.video_music && job.video_music.length > 0 ? (
+                                        job.video_music.map((track: any, i: number) => (
+                                            <div key={i} className="bg-background/50 p-2 rounded text-xs">
+                                                <p className="mb-1 truncate font-mono opacity-70">Track {i + 1}</p>
+                                                <audio
+                                                    src={track.music_library?.url}
+                                                    controls
+                                                    className="w-full h-8"
+                                                />
+                                            </div>
+                                        ))
+                                    ) : (
+                                        <div className="text-muted text-xs">No audio tracks found.</div>
+                                    )}
+                                </div>
                             </div>
                         </div>
                     </div>

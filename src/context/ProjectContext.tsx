@@ -17,6 +17,7 @@ interface ProjectContextType {
     refreshProjects: () => Promise<void>;
     createProject: (name: string) => Promise<void>;
     deleteProject: (id: string) => Promise<void>;
+    updateProject: (id: string, updates: Partial<Project>) => Promise<void>;
 }
 
 const ProjectContext = createContext<ProjectContextType | undefined>(undefined);
@@ -142,6 +143,27 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
         }
     };
 
+    const updateProject = async (id: string, updates: Partial<Project>) => {
+        try {
+            const { data, error } = await supabase
+                .from("projects")
+                .update(updates)
+                .eq("id", id)
+                .select()
+                .single();
+
+            if (error) throw error;
+
+            setProjects((prev) => prev.map((p) => (p.id === id ? data : p)));
+            if (currentProject?.id === id) {
+                setCurrentProject(data);
+            }
+        } catch (error) {
+            console.error("Error updating project:", error);
+            throw error;
+        }
+    };
+
     return (
         <ProjectContext.Provider
             value={{
@@ -152,6 +174,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
                 refreshProjects,
                 createProject,
                 deleteProject,
+                updateProject,
             }}
         >
             {children}

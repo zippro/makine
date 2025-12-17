@@ -2,17 +2,54 @@
 
 export type JobStatus = 'queued' | 'processing' | 'done' | 'error';
 
+export interface TimelineItem {
+  type: 'animation' | 'image';
+  id?: string; // for animations
+  url?: string; // for images
+  duration: number;
+  loop?: boolean; // for animations
+}
+
+export interface OverlayItem {
+  type: 'image' | 'text';
+  url?: string;
+  content?: string;
+  start: number;
+  duration: number;
+  position: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right' | 'center';
+  font?: string;
+}
+
+export interface Project {
+  id: string;
+  name: string;
+  user_id: string; // Owner
+  created_at: string;
+  youtube_creds?: {
+    client_id: string;
+    client_secret: string;
+    refresh_token: string;
+    channel_id?: string;
+  };
+}
+
 export interface VideoJob {
   id: string;
-  user_id: string;
-  image_url: string;
-  audio_url: string;
-  title_text: string;
+  project_id: string;
   status: JobStatus;
-  error_message: string | null;
+  title_text: string;
+  animation_id?: string; // Legacy
+  music_ids: string[];
+  assets?: {
+    timeline: TimelineItem[];
+    overlays: OverlayItem[];
+  };
   video_url: string | null;
+  image_url: string | null;
+  audio_url: string | null;
   thumbnail_url: string | null;
   duration_seconds: number | null;
+  error_message: string | null;
   created_at: string;
   updated_at: string;
 }
