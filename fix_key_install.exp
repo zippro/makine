@@ -1,0 +1,31 @@
+#!/usr/bin/expect -f
+
+set timeout 20
+set ip "46.62.209.244"
+set password "RendiWorker2025!"
+set pubkey "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAACAQCkqqL2rx6Hh9llcGaJbnj9SJY8zS0WdvO+p/VcmGKyMZFqCC7nS3cj9KYDf+7NiNsUR3iewodisI0VdKlKKil/PiQ1bwWzoy64zsGEJtZrUxe3L5bCNAjnDx2gVCfQtak97PCmU8iZkKkLRdFloDcbV/H61rPKi+AWdur3jpstow1kDZgObfQsfOKHMo9O0+6LD+FcENTlSRrhi2rAcSCYteNbKUnT0uU+EN1Q+6YNIVypA1b8aXzjplBUF7mThHPppWiU0fJBIlGBaVFRF5W71NmuNSA5yHuoGgsRiiCMEbHKDlvwf+ONcfciqe1adydZQY5r8u0m9eIOZ/pH+rHVluuJRVyX7rIJN7Q38n3al+9nRWhXLgJyr2J95F+xNaREdgw3/ksd1fZkf00rx53Vj4kFF86RoUN7Zx6I+eDg/RPrs9bXyE/0feZbQhdZYvkrcuCVYm+9CuuRwACSFlxw2FCSE7BlFyzxywpM/W+V018jjV6Dnv+L/NAPjrOFjk70f3Jcig0PI0f4TbwrG+lN6CJPKFfH9/d+QmjZ77xb3fCWuLKRq6BOPcR+7hPuJVewt68wBypdgH9a2IV+K/kB5XlfyMNT1yCIP36kQt7z8OXXqhXddVWFakQceHrmK+FSQ+E/RhaVoA72YEZxP4dej8upbCathkAJt2U9V7cKDw== narcadeteknolojiltd.sti.@192.168.1.59"
+
+spawn ssh -o StrictHostKeyChecking=no root@$ip
+
+expect {
+    "password:" {
+        send "$password\r"
+        exp_continue
+    }
+    "root@" {
+        send "mkdir -p ~/.ssh\r"
+        expect "root@"
+        send "echo \"$pubkey\" >> ~/.ssh/authorized_keys\r"
+        expect "root@"
+        send "chmod 600 ~/.ssh/authorized_keys\r"
+        expect "root@"
+        send "exit\r"
+    }
+    timeout {
+        puts "Timeout occurred"
+        exit 1
+    }
+    eof {
+        puts "SSH Connection Closed"
+    }
+}
