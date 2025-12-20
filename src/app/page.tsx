@@ -150,21 +150,32 @@ export default function Home() {
     }
   };
 
-  const addAssetToPlaylist = async (anim: Animation) => {
+  const toggleAssetInPlaylist = async (anim: Animation) => {
     if (!currentProject) return;
 
     const supabase = createClient();
     const currentAssets = (currentProject as any).template_assets || [];
-    const newAsset = {
-      id: crypto.randomUUID(),
-      type: 'animation',
-      url: anim.url,
-      duration: 10
-    };
+    const existingIndex = currentAssets.findIndex((a: any) => a.url === anim.url);
+
+    let newAssets;
+    if (existingIndex >= 0) {
+      // Remove
+      newAssets = [...currentAssets];
+      newAssets.splice(existingIndex, 1);
+    } else {
+      // Add
+      const newAsset = {
+        id: crypto.randomUUID(),
+        type: 'animation',
+        url: anim.url,
+        duration: 10
+      };
+      newAssets = [...currentAssets, newAsset];
+    }
 
     const { data } = await supabase
       .from("projects")
-      .update({ template_assets: [...currentAssets, newAsset] })
+      .update({ template_assets: newAssets })
       .eq("id", currentProject.id)
       .select()
       .single();
@@ -465,7 +476,7 @@ export default function Home() {
                           setSelectedAnimation(anim.id);
                           setShowAnimationPicker(false);
                         } else {
-                          addAssetToPlaylist(anim);
+                          toggleAssetInPlaylist(anim);
                           // Don't close modal in multi-mode
                         }
                       }}

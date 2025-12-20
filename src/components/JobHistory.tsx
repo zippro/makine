@@ -6,12 +6,16 @@ import { Clock, Play, RefreshCw, Trash2, Youtube } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { JobStatusBadge } from './JobStatus';
 import type { VideoJob } from '@/lib/types';
+import { YouTubePublishModal } from './YouTubePublishModal';
+import { useProject } from '@/context/ProjectContext';
 
 interface JobHistoryProps {
     limit?: number;
 }
 
 export function JobHistory({ limit }: JobHistoryProps) {
+    const { currentProject } = useProject();
+
     const isVideoFile = (url: string | null) => {
         if (!url) return false;
         try {
@@ -25,7 +29,9 @@ export function JobHistory({ limit }: JobHistoryProps) {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string>('');
     const [deletingId, setDeletingId] = useState<string | null>(null);
+    const [publishingJob, setPublishingJob] = useState<VideoJob | null>(null);
 
+    // Initial load + dependency on currentProject
     useEffect(() => {
         let cancelled = false;
 
@@ -36,6 +42,11 @@ export function JobHistory({ limit }: JobHistoryProps) {
                 .from('video_jobs')
                 .select('*')
                 .order('created_at', { ascending: false });
+
+            // Project Isolation
+            if (currentProject) {
+                query = query.eq('project_id', currentProject.id);
+            }
 
             if (limit) {
                 query = query.limit(limit);
@@ -60,31 +71,28 @@ export function JobHistory({ limit }: JobHistoryProps) {
         return () => {
             cancelled = true;
         };
-    }, [limit]);
+    }, [limit, currentProject]);
 
     // Poll for updates
     useEffect(() => {
         const interval = setInterval(() => {
-            // Only poll if there are active jobs or to catch new ones
-            // For simplicity and to satisfy "change without refreshing", we poll always
-            // but we can optimize to only update if we see a change? 
-            // Rewriting loadJobs to be reusable without 'cancelled' variable closure issues
             handleRefresh();
         }, 5000);
 
         return () => clearInterval(interval);
-    }, [limit]);
+    }, [limit, currentProject]);
 
     const handleRefresh = async () => {
-        // Don't set loading true for background refresh
-        setError('');
-
         const supabase = createClient();
 
         let query = supabase
             .from('video_jobs')
             .select('*')
             .order('created_at', { ascending: false });
+
+        if (currentProject) {
+            query = query.eq('project_id', currentProject.id);
+        }
 
         if (limit) {
             query = query.limit(limit);
@@ -93,13 +101,12 @@ export function JobHistory({ limit }: JobHistoryProps) {
         const { data, error: fetchError } = await query;
 
         if (fetchError) {
-            setError('Failed to load job history');
-            setLoading(false);
+            // Silent fail on refresh
             return;
         }
 
         setJobs(data || []);
-        setLoading(false);
+        // Don't modify loading state on refresh
     };
 
     const handleDelete = async (e: React.MouseEvent, jobId: string) => {
@@ -264,28 +271,10 @@ export function JobHistory({ limit }: JobHistoryProps) {
                     <div className="absolute top-4 right-4 flex items-center gap-2">
                         {job.status === 'done' && (
                             <button
-                                onClick={async (e) => {
+                                onClick={(e) => {
                                     e.preventDefault();
                                     e.stopPropagation();
-                                    if (!confirm("Publish this video to YouTube?")) return;
-
-                                    const btn = e.currentTarget;
-                                    btn.disabled = true;
-                                    btn.innerHTML = '...';
-
-                                    try {
-                                        const res = await fetch(`/api/jobs/${job.id}/publish`, { method: 'POST' });
-                                        const data = await res.json();
-                                        if (!res.ok) throw new Error(data.error);
-
-                                        alert(`Published! URL: ${data.url}`);
-                                    } catch (err: any) {
-                                        alert('Upload Failed: ' + err.message);
-                                    } finally {
-                                        btn.disabled = false;
-                                        // Reset icon (rudimentary re-render)
-                                        btn.innerHTML = '<svg class="w-4 h-4" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 17a24.12 24.12 0 0 1 0-10 2 2 0 0 1 1.4-1.4 49.56 49.56 0 0 1 16.2 0A2 2 0 0 1 21.5 7a24.12 24.12 0 0 1 0 10 2 2 0 0 1-1.4 1.4 49.55 49.55 0 0 1-16.2 0A2 2 0 0 1 2.5 17"/><path d="m10 15 5-3-5-3z"/></svg>';
-                                    }
+                                    setPublishingJob(job);
                                 }}
                                 className="p-2 rounded-lg bg-red-600/10 text-red-600 hover:bg-red-600/20 transition-colors disabled:opacity-50"
                                 title="Publish to YouTube"
@@ -308,6 +297,30 @@ export function JobHistory({ limit }: JobHistoryProps) {
                     </div>
                 </div>
             ))}
+            {/* Modal */}
+            {publishingJob && (
+                <YouTubePublishModal
+                    job={publishingJob}
+                    isOpen={!!publishingJob}
+                    onClose={() => setPublishingJob(null)}
+                    onPublish={async (metadata) => {
+                        try {
+                            const res = await fetch(`/api/jobs/${publishingJob.id}/publish`, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify(metadata)
+                            });
+                            const data = await res.json();
+                            if (!res.ok) throw new Error(data.error);
+
+                            alert(`Published! URL: ${data.url}`);
+                        } catch (err: any) {
+                            alert('Upload Failed: ' + err.message);
+                            throw err; // Propegate to modal validation
+                        }
+                    }}
+                />
+            )}
         </div>
     );
 }

@@ -11,33 +11,32 @@ export async function POST(request: NextRequest) {
 
         // Parse request body
         const body = await request.json();
-
         const { animation_id, music_ids, title_text, project_id } = body;
 
-        // Validate required fields
-        if (!animation_id) {
-            return NextResponse.json(
-                { error: 'Missing required field: animation_id' },
-                { status: 400 }
-            );
-        }
-        if (!music_ids || !Array.isArray(music_ids) || music_ids.length === 0) {
-            return NextResponse.json(
-                { error: 'Missing required field: music_ids (array)' },
-                { status: 400 }
-            );
-        }
-        if (!title_text) {
-            return NextResponse.json(
-                { error: 'Missing required field: title_text' },
-                { status: 400 }
-            );
-        }
-        if (!project_id) {
-            return NextResponse.json(
-                { error: 'Missing required field: project_id' },
-                { status: 400 }
-            );
+
+        // Get project settings for mode/overlays
+        // We do this BEFORE validation to know which mode we are in
+        const { data: projectData, error: projError } = await supabase
+            .from('projects')
+            .select('video_mode, template_assets, overlay_config')
+            .eq('id', project_id)
+            .single();
+
+        const videoMode = projectData?.video_mode || 'simple_animation';
+        const templateAssets = projectData?.template_assets || [];
+        const overlayConfig = projectData?.overlay_config || { images: [], title: { enabled: true } };
+
+        // Validate Mode-Specific Requirements
+        if (videoMode === 'simple_animation') {
+            if (!animation_id) {
+                return NextResponse.json({ error: 'Missing required field: animation_id' }, { status: 400 });
+            }
+        } else {
+            // Multi/Slideshow
+            if (!templateAssets || templateAssets.length === 0) {
+                return NextResponse.json({ error: 'Playlist is empty. Add assets in Project Settings.' }, { status: 400 });
+            }
+            // animation_id is optional/ignored here
         }
 
         // Validate title length
@@ -48,18 +47,84 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        // Get animation details
-        const { data: animation, error: animError } = await supabase
-            .from('animations')
-            .select('url')
-            .eq('id', animation_id)
-            .single();
+        // --- ASSET CONSTRUCTION ---
+        let assets = [];
+        let mainAnimationUrl = '';
 
-        if (animError || !animation) {
-            return NextResponse.json(
-                { error: 'Animation not found' },
-                { status: 404 }
-            );
+        if (videoMode === 'simple_animation' && animation_id) {
+            // Get animation details
+            const { data: animation, error: animError } = await supabase
+                .from('animations')
+                .select('url')
+                .eq('id', animation_id)
+                .single();
+
+            if (animError || !animation) {
+                return NextResponse.json({ error: 'Animation not found' }, { status: 404 });
+            }
+            mainAnimationUrl = animation.url;
+
+            // Simple Mode Asset: One video loop
+            assets.push({
+                type: 'video',
+                url: animation.url,
+                start_time: 0,
+                duration: null, // Loop for full duration
+                loop: true,
+                position: 'center'
+            });
+        }
+        else {
+            // Multi/Slideshow Assets
+            // Map template_assets to job assets
+            // Assuming template_assets structure: { type, url, duration }
+            let currentTime = 0;
+            // logic: we don't strictly set start_time for a looped sequence in the backend usually, 
+            // but the worker expects a list.
+            // For now, let's pass the raw list as the "playlist" and the worker handles the looping.
+            // Or better: Pass them as standard assets. 
+
+            // To support the "Loop" requirement, the worker likely needs a special flag or we just pass the list.
+            // Let's copy the template assets directly.
+            assets = [...templateAssets];
+            // If it's slideshow, ensure type is image
+            if (videoMode === 'image_slideshow') {
+                assets = assets.map(a => ({ ...a, type: 'image' }));
+            }
+        }
+
+        // Add Global Overlays (Title)
+        if (overlayConfig.title?.enabled) {
+            // Ensure timing values are always valid numbers
+            const titleStartTime = Number(overlayConfig.title.start_time) || 0;
+            const titleDuration = Number(overlayConfig.title.duration) || 5;
+
+            assets.push({
+                type: 'text',
+                content: title_text,
+                start_time: titleStartTime,
+                duration: titleDuration,
+                position: overlayConfig.title.position || 'center',
+                font: overlayConfig.title.font || 'Arial',
+                style: {
+                    fontSize: overlayConfig.title.fontSize || 60,
+                    color: 'white',
+                    shadow: true
+                },
+                is_overlay: true
+            });
+        }
+
+        // Add Global Overlays (Images)
+        if (overlayConfig.images && Array.isArray(overlayConfig.images)) {
+            assets.push(...overlayConfig.images.map((img: any) => ({
+                type: 'image',
+                url: img.url,
+                start_time: img.start_time || 0,
+                duration: img.duration || 5,
+                position: img.position || 'center',
+                is_overlay: true // explicit flag if needed
+            })));
         }
 
         // Get music details
@@ -83,13 +148,15 @@ export async function POST(request: NextRequest) {
             .from('video_jobs')
             .insert({
                 user_id: user?.id || null,
-                animation_id,
+                animation_id: videoMode === 'simple_animation' ? animation_id : null,
                 title_text,
                 project_id,
                 status: 'queued',
-                // Keep legacy fields for compatibility
-                image_url: animation.url,
+                // Legacy fields shim
+                image_url: mainAnimationUrl || (assets[0]?.url) || '',
                 audio_url: orderedMusic[0]?.url || '',
+                // NEW: Save the full assets logic
+                assets: assets
             })
             .select()
             .single();
@@ -113,34 +180,13 @@ export async function POST(request: NextRequest) {
                 });
         }
 
-        // Update animation usage count
-        await supabase.rpc('increment_animation_usage', { anim_id: animation_id });
-
-        // Update music usage counts
+        // Update usage counts
+        if (animation_id) {
+            await supabase.rpc('increment_animation_usage', { anim_id: animation_id });
+        }
         for (const musicId of music_ids) {
             await supabase.rpc('increment_music_usage', { mus_id: musicId });
         }
-
-        // Trigger n8n webhook to start processing
-        // const n8nWebhookUrl = process.env.N8N_WEBHOOK_URL;
-        // if (n8nWebhookUrl) {
-        //     try {
-        //         await fetch(n8nWebhookUrl, {
-        //             method: 'POST',
-        //             headers: { 'Content-Type': 'application/json' },
-        //             body: JSON.stringify({
-        //                 job_id: job.id,
-        //                 animation_url: animation.url,
-        //                 music_urls: orderedMusic.filter(Boolean).map((t) => t!.url),
-        //                 music_durations: orderedMusic.filter(Boolean).map((t) => t!.duration_seconds || 0),
-        //                 title_text: title_text,
-        //                 title_appear_at: 7, // Text appears at 7 seconds
-        //             }),
-        //         });
-        //     } catch (webhookError) {
-        //         console.error('Error triggering n8n webhook:', webhookError);
-        //     }
-        // }
 
         return NextResponse.json(job, { status: 201 });
     } catch (error) {
@@ -151,6 +197,7 @@ export async function POST(request: NextRequest) {
         );
     }
 }
+
 
 // GET /api/jobs - List all jobs for a project
 export async function GET(request: NextRequest) {

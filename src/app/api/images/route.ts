@@ -6,7 +6,8 @@ export const dynamic = 'force-dynamic';
 // POST /api/images - Create new image entry
 export async function POST(request: NextRequest) {
     try {
-        const supabase = await createClient();
+        // Use Admin Client to bypass RLS in Dev Mode
+        const supabase = createAdminClient();
         const body = await request.json();
         const { url, filename, file_size, width, height, project_id } = body;
 

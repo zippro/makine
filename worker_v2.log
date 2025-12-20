@@ -1,2 +1,33 @@
 🚀 Local FFmpeg Worker Started
 Waiting for jobs with status "queued"...
+
+--- Processing Job 604e1825-2341-4df5-ac0c-7384f3b6a7d3 ---
+Title: 8909
+Downloading assets...
+Downloading: https://v3b.fal.media/files/b/0a86734c/qHQ-6d52WlXK5ABbkM-rL_output.mp4
+  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0  0 4482k    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0 15 4482k   15  705k    0     0   395k      0  0:00:11  0:00:01  0:00:10  395k 64 4482k   64 2881k    0     0  1036k      0  0:00:04  0:00:02  0:00:02 1036k100 4482k  100 4482k    0     0  1265k      0  0:00:03  0:00:03 --:--:-- 1265k
+Downloading: https://lcysphtjcrhgopjrmjca.supabase.co/storage/v1/object/public/audio/1766005924499-3k8zt.mp3
+  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0  7 5438k    7  383k    0     0  1591k      0  0:00:03 --:--:--  0:00:03 1589k 56 5438k   56 3091k    0     0  2525k      0  0:00:02  0:00:01  0:00:01 2523k100 5438k  100 5438k    0     0  2743k      0  0:00:01  0:00:01 --:--:-- 2743k
+Track 0 OK (5568910 bytes).
+Downloading: https://lcysphtjcrhgopjrmjca.supabase.co/storage/v1/object/public/audio/1766005918697-nl055k.mp3
+  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+  0     0    0     0    0     0      0      0 --:--:-- --:--:-- --:--:--     0  6 3751k    6  245k    0     0  1132k      0  0:00:03 --:--:--  0:00:03 1131k 81 3751k   81 3069k    0     0  2500k      0  0:00:01  0:00:01 --:--:-- 2499k100 3751k  100 3751k    0     0  2446k      0  0:00:01  0:00:01 --:--:-- 2445k
+Track 1 OK (3841361 bytes).
+calculated totalDuration: 412 (Rounded)
+Running FFmpeg...
+Command: ffmpeg -y -stream_loop 43 -i "/tmp/rendi_worker/604e1825-2341-4df5-ac0c-7384f3b6a7d3/input_video.mp4" -i "/tmp/rendi_worker/604e1825-2341-4df5-ac0c-7384f3b6a7d3/input_audio_0.mp3" -i "/tmp/rendi_worker/604e1825-2341-4df5-ac0c-7384f3b6a7d3/input_audio_1.mp3" -filter_complex "[0:v]trim=0:412,setpts=PTS-STARTPTS,drawtext=fontfile='/System/Library/Fonts/Supplemental/Georgia.ttf':text='8909':fontsize=80:fontcolor=white:borderw=2:bordercolor=black:x=(w-text_w)/2:y=(h-text_h)/2+150[v];[1:a][2:a]concat=n=2:v=0:a=1[a]" -map "[v]" -map "[a]" -c:v libx264 -crf 28 -preset fast -c:a aac -b:a 128k -movflags +faststart -shortest "/tmp/rendi_worker/604e1825-2341-4df5-ac0c-7384f3b6a7d3/output.mp4"
+ffmpeg version 8.0 Copyright (c) 2000-2025 the FFmpeg developers
+  built with Apple clang version 17.0.0 (clang-1700.0.13.3)
+  configuration: --prefix=/opt/homebrew/Cellar/ffmpeg/8.0_1 --enable-shared --enable-pthreads --enable-version3 --cc=clang --host-cflags= --host-ldflags='-Wl,-ld_classic' --enable-ffplay --enable-gnutls --enable-gpl --enable-libaom --enable-libaribb24 --enable-libbluray --enable-libdav1d --enable-libharfbuzz --enable-libjxl --enable-libmp3lame --enable-libopus --enable-librav1e --enable-librist --enable-librubberband --enable-libsnappy --enable-libsrt --enable-libssh --enable-libsvtav1 --enable-libtesseract --enable-libtheora --enable-libvidstab --enable-libvmaf --enable-libvorbis --enable-libvpx --enable-libwebp --enable-libx264 --enable-libx265 --enable-libxml2 --enable-libxvid --enable-lzma --enable-libfontconfig --enable-libfreetype --enable-frei0r --enable-libass --enable-libopencore-amrnb --enable-libopencore-amrwb --enable-libopenjpeg --enable-libspeex --enable-libsoxr --enable-libzmq --enable-libzimg --disable-libjack --disable-indev=jack --enable-videotoolbox --enable-audiotoolbox --enable-neon
+  libavutil      60.  8.100 / 60.  8.100
+  libavcodec     62. 11.100 / 62. 11.100
+  libavformat    62.  3.100 / 62.  3.100
+  libavdevice    62.  1.100 / 62.  1.100
+  libavfilter    11.  4.100 / 11.  4.100
+  libswscale      9.  1.100 /  9.  1.100
+  libswresample   6.  1.100 /  6.  1.100

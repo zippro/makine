@@ -35,6 +35,7 @@ interface TitleConfig {
     duration: number;
     position: string;
     font: string;
+    fontSize?: number;
 }
 
 interface OverlayConfig {
@@ -426,21 +427,36 @@ export function ProjectConfigModal({ project, isOpen, onClose, onUpdate }: Proje
                                                 </div>
                                                 <div>
                                                     <label className="text-xs text-muted block mb-1">Font</label>
-                                                    <select
-                                                        value={overlayConfig.title?.font || 'Arial'}
-                                                        onChange={(e) => setOverlayConfig({
-                                                            ...overlayConfig,
-                                                            title: { ...overlayConfig.title, font: e.target.value }
-                                                        })}
-                                                        className="w-full bg-background border border-border rounded px-3 py-2 text-sm"
-                                                    >
-                                                        <option value="Arial">Arial</option>
-                                                        <option value="Helvetica">Helvetica</option>
-                                                        <option value="Times New Roman">Times New Roman</option>
-                                                        <option value="Georgia">Georgia</option>
-                                                        <option value="Verdana">Verdana</option>
-                                                        <option value="Impact">Impact</option>
-                                                    </select>
+                                                    <div className="flex gap-2">
+                                                        <select
+                                                            value={overlayConfig.title?.font || 'Arial'}
+                                                            onChange={(e) => setOverlayConfig({
+                                                                ...overlayConfig,
+                                                                title: { ...overlayConfig.title, font: e.target.value }
+                                                            })}
+                                                            className="flex-1 bg-background border border-border rounded px-3 py-2 text-sm"
+                                                        >
+                                                            <option value="Arial">Arial</option>
+                                                            <option value="Helvetica">Helvetica</option>
+                                                            <option value="Times New Roman">Times New Roman</option>
+                                                            <option value="Georgia">Georgia</option>
+                                                            <option value="Verdana">Verdana</option>
+                                                            <option value="Impact">Impact</option>
+                                                        </select>
+                                                        <input
+                                                            type="number"
+                                                            value={overlayConfig.title?.fontSize ?? 60}
+                                                            onChange={(e) => setOverlayConfig({
+                                                                ...overlayConfig,
+                                                                title: { ...overlayConfig.title, fontSize: parseInt(e.target.value) || 60 }
+                                                            })}
+                                                            className="w-20 bg-background border border-border rounded px-3 py-2 text-sm"
+                                                            min="10"
+                                                            max="200"
+                                                            placeholder="Size"
+                                                            title="Font Size"
+                                                        />
+                                                    </div>
                                                 </div>
                                                 <div>
                                                     <label className="text-xs text-muted block mb-1">Position</label>

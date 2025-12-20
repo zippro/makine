@@ -31,6 +31,19 @@ export interface Project {
     refresh_token: string;
     channel_id?: string;
   };
+  video_mode?: 'simple_animation' | 'multi_animation' | 'image_slideshow';
+  template_assets?: any[]; // Using any[] for flexibility, or stronger type if preferred
+  overlay_config?: {
+    images: any[];
+    title: {
+      enabled: boolean;
+      start_time: number;
+      duration: number;
+      position: string;
+      font: string;
+      fontSize?: number;
+    };
+  };
 }
 
 export interface VideoJob {

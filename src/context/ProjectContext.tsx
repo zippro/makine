@@ -3,11 +3,7 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from "react";
 import { createClient } from "@/lib/supabase/client";
 
-interface Project {
-    id: string;
-    name: string;
-    created_at: string;
-}
+import { Project } from "@/lib/types";
 
 interface ProjectContextType {
     currentProject: Project | null;
@@ -65,7 +61,7 @@ export function ProjectProvider({ children }: { children: ReactNode }) {
         try {
             const { data: projectsData, error } = await supabase
                 .from("projects")
-                .select("*")
+                .select("*, video_mode, template_assets, overlay_config")
                 .order("created_at", { ascending: false });
 
             if (error) throw error;

@@ -1,41 +1,56 @@
-require('dotenv').config({ path: '.env.local' });
+
+const fs = require('fs');
+const path = require('path');
 const { createClient } = require('@supabase/supabase-js');
 
-const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
+// Manual env parsing
+try {
+    const envConfig = fs.readFileSync(path.resolve(__dirname, '../.env.local'), 'utf8');
+    envConfig.split('\n').forEach(line => {
+        const [key, val] = line.split('=');
+        if (key && val) process.env[key.trim()] = val.trim();
+    });
+} catch (e) {
+    console.warn('Could not read .env.local');
+}
 
-async function checkLatest() {
-    console.log('--- Latest Job Debug ---');
-    const { data: job, error } = await supabase
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+if (!supabaseUrl || !supabaseKey) {
+    console.error('Missing env vars');
+    process.exit(1);
+}
+
+const supabase = createClient(supabaseUrl, supabaseKey);
+
+async function checkLatestJob() {
+    const { data: jobs, error } = await supabase
         .from('video_jobs')
-        .select(`
-            id, status, created_at, error_message, title_text,
-            video_music (
-                order_index,
-                music_library ( id, filename, duration_seconds, url )
-            )
-        `)
+        .select('*')
         .order('created_at', { ascending: false })
-        .limit(1)
-        .single();
+        .limit(1);
 
     if (error) {
-        console.error('Error:', error);
+        console.error('Error fetching job:', error);
         return;
     }
 
-    console.log(`Job ID: ${job.id}`);
-    console.log(`Status: ${job.status}`);
-    console.log(`Title: ${job.title_text}`);
-    if (job.error_message) console.log(`Error: ${job.error_message}`);
-
-    console.log('\nMusic Tracks:');
-    if (job.video_music && job.video_music.length > 0) {
-        job.video_music.forEach(vm => {
-            console.log(`- [#${vm.order_index}] ${vm.music_library.filename} (${vm.music_library.duration_seconds}s)`);
-        });
-    } else {
-        console.log('No music tracks found linked.');
+    if (!jobs || jobs.length === 0) {
+        console.log('No jobs found.');
+        return;
     }
+
+    const job = jobs[0];
+    console.log('Latest Job:', {
+        id: job.id,
+        status: job.status,
+        created_at: job.created_at,
+        updated_at: job.updated_at,
+        error: job.error_message,
+        assets: JSON.stringify(job.assets, null, 2),
+        music_ids: job.music_ids
+    });
 }
 
-checkLatest();
+checkLatestJob();

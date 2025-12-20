@@ -209,7 +209,7 @@ export default function JobDetailPage() {
                                     ) : (
                                         /* eslint-disable-next-line @next/next/no-img-element */
                                         <img
-                                            src={job.image_url}
+                                            src={job.image_url || ""}
                                             alt="Source image"
                                             className="w-full h-full object-cover"
                                             onError={(e) => {

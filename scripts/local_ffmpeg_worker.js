@@ -37,11 +37,7 @@ async function processJob(job) {
         // 1. Update status to processing
         await supabase.from('video_jobs').update({ status: 'processing' }).eq('id', jobId);
 
-        // 2. Fetch Job Details (Joined)
-        // We need to fetch again to get the relation data if not passed, but our loop will likely just grab raw job.
-        // We need the music and animation URLs. The job row has image_url (animation) and audio_url (first music).
-        // But for multi-track, we need to query the junction table.
-
+        // 2. Fetch Music Details
         const { data: musicRel, error: musicError } = await supabase
             .from('video_music')
             .select(`
@@ -55,123 +51,320 @@ async function processJob(job) {
 
         const musicUrls = musicRel.map(m => m.music_library.url);
         const musicDurations = musicRel.map(m => m.music_library.duration_seconds || 0);
-        const animationUrl = job.image_url; // Legacy field name holds animation url
 
-        // 3a. Use Local System Font (Reliable/Elegant)
-        const fontPath = '/System/Library/Fonts/Supplemental/Georgia.ttf';
-        // await downloadFile(fontUrl, fontPath); // Disabled external download
+        // 3. Analyze Assets (Legacy vs New)
+        // Backend now sends assets as an array of objects
+        let timeline = [];
+        let overlays = [];
 
-        // 3b. Download Assets
-        console.log('Downloading assets...');
-        const videoPath = path.join(workDir, 'input_video.mp4');
-        try {
-            await downloadFile(animationUrl, videoPath);
-            // Validate Video
-            const vidStats = fs.statSync(videoPath);
-            if (vidStats.size < 1000) throw new Error('Video file too small (<1KB)');
-        } catch (e) {
-            throw new Error(`Critical: Failed to load animation: ${e.message}`);
+        if (Array.isArray(job.assets)) {
+            // New Format
+            timeline = job.assets.filter(a => !a.is_overlay);
+            overlays = job.assets.filter(a => a.is_overlay);
+        } else {
+            // Legacy / Fallback
+            const assetsObj = job.assets || {};
+            timeline = assetsObj.timeline || [];
+            overlays = assetsObj.overlays || [];
         }
 
+        // If timeline is empty but we have legacy fields, construct a single timeline item
+        if (timeline.length === 0 && job.image_url) {
+            timeline.push({
+                type: 'video', // Assume video for legacy
+                url: job.image_url,
+                duration: null,
+                loop: true
+            });
+        }
+
+        const isAdvanced = timeline.length > 0;
+        // Logic update: We treat everything as "Advanced" pipeline essentially, 
+        // to support overlays on simple animations too.
+
+        // 3a. Use Local System Font
+        const fontPath = '/System/Library/Fonts/Supplemental/Georgia.ttf';
+
+        // 3b. Download Video Assets
+        console.log(isAdvanced ? `Downloading ${timeline.length} timeline assets...` : 'Downloading single asset...');
+
+        const videoInputs = [];
+        let totalVideoDuration = 0; // For timeline calculation
+
+        if (isAdvanced) {
+            // Advanced Mode: Download all timeline items
+            for (let i = 0; i < timeline.length; i++) {
+                const item = timeline[i];
+                const itemPath = path.join(workDir, `input_video_${i}${path.extname(new URL(item.url).pathname) || '.mp4'}`);
+
+                try {
+                    await downloadFile(item.url, itemPath);
+                    // Check size
+                    if (fs.statSync(itemPath).size < 1000) throw new Error('File too small');
+
+                    videoInputs.push({ path: itemPath, isVideo: item.type === 'video', duration: item.duration, loop: item.loop });
+                } catch (e) {
+                    throw new Error(`Failed to download timeline item ${i}: ${e.message}`);
+                }
+            }
+        } else {
+            // Legacy Mode
+            let animationUrl = job.image_url;
+
+            // Fix for Dynamic Homepage: If image_url is empty but animation_id exists, fetch it
+            if (!animationUrl && job.animation_id) {
+                console.log(`Fetching animation details for ID: ${job.animation_id}`);
+                const { data: animData, error: animError } = await supabase
+                    .from('animations')
+                    .select('url')
+                    .eq('id', job.animation_id)
+                    .single();
+
+                if (animError) {
+                    console.error('Failed to fetch animation URL:', animError.message);
+                } else if (animData) {
+                    animationUrl = animData.url;
+                    console.log('Resolved Animation URL:', animationUrl);
+                }
+            }
+
+            if (!animationUrl) throw new Error('No image_url or animation_id provided');
+
+            const videoPath = path.join(workDir, 'input_video.mp4');
+            try {
+                await downloadFile(animationUrl, videoPath);
+                if (fs.statSync(videoPath).size < 1000) throw new Error('Video file too small (<1KB)');
+                videoInputs.push({ path: videoPath, isVideo: true }); // Assume video for legacy
+            } catch (e) {
+                throw new Error(`Critical: Failed to load animation: ${e.message}`);
+            }
+        }
+
+        // 3c. Download Audio Assets
         const musicPaths = [];
         for (let i = 0; i < musicUrls.length; i++) {
             const mPath = path.join(workDir, `input_audio_${i}.mp3`);
             try {
-                if (!musicUrls[i]) {
-                    console.warn(`Skipping Track ${i}: No URL provided.`);
+                if (!musicUrls[i]) continue;
+                await downloadFile(musicUrls[i], mPath);
+                const stats = fs.statSync(mPath);
+                if (stats.size < 1000) {
+                    console.warn(`Skipping Track ${i}: File too small.`);
                     continue;
                 }
-
-                await downloadFile(musicUrls[i], mPath);
-
-                // Validate Audio
-                if (!fs.existsSync(mPath)) throw new Error('File missing after download');
-                const stats = fs.statSync(mPath);
-                if (stats.size < 1000) { // < 1KB
-                    console.warn(`Skipping Track ${i}: File too small (${stats.size} bytes). Likely corrupted.`);
-                    continue; // Skip this track
-                }
-
                 musicPaths.push(mPath);
-                console.log(`Track ${i} OK (${stats.size} bytes).`);
-
             } catch (e) {
-                console.warn(`Skipping Track ${i} due to error: ${e.message}`);
-                // Continue to next track, don't crash job
+                console.warn(`Skipping Track ${i}: ${e.message}`);
             }
         }
 
-        if (musicPaths.length === 0) {
-            console.warn('Warning: No valid music tracks found. Video will be silent.');
+        if (musicPaths.length === 0) console.warn('Warning: No valid music tracks found. Video will be silent.');
+
+        // 3d. Download Overlay Images
+        const overlayImagePaths = new Map(); // key: overlay index, value: path
+        for (let i = 0; i < overlays.length; i++) {
+            const ov = overlays[i];
+            if (ov.type === 'image' && ov.url) {
+                const ovPath = path.join(workDir, `overlay_image_${i}${path.extname(new URL(ov.url).pathname) || '.png'}`);
+                try {
+                    console.log(`Downloading Overlay ${i}: ${ov.url}`);
+                    await downloadFile(ov.url, ovPath);
+                    if (fs.statSync(ovPath).size < 100) {
+                        console.warn(`Skipping Overlay ${i}: File too small.`);
+                        continue;
+                    }
+                    overlayImagePaths.set(i, ovPath);
+                } catch (e) {
+                    console.warn(`Failed to download overlay ${i}: ${e.message}`);
+                }
+            }
         }
 
-        // 4. Calculate Logic
+        // 4. Calculate Duration
         let totalDuration = Math.round(musicDurations.reduce((sum, d) => sum + (d || 0), 0));
-        console.log(`calculated totalDuration: ${totalDuration} (Rounded)`);
+        console.log(`calculated totalDuration: ${totalDuration}`);
         if (totalDuration === 0) totalDuration = 10;
 
-        const loopCount = Math.ceil(totalDuration / 10) + 1;
-        const cleanTitle = (job.title_text || '').replace(/'/g, "'\\''");
-
-        // Text Animation Settings
-        const tStart = 7;
-        const fadeDur = 1;
-        const tEnd = tStart + 4; // Total visible time including fades (7 to 11)
-
-        // Alpha Expression (No backslashes, single quotes protect commas)
-        // if t < tStart: 0
-        // if t < tStart + fadeDur: (t - tStart) / fadeDur  (Fade In)
-        // if t < tEnd - fadeDur: 1 (Hold)
-        // if t < tEnd: (tEnd - t) / fadeDur (Fade Out)
-        // else: 0
-        const alphaExpr = `if(lt(t,${tStart}),0,if(lt(t,${tStart + fadeDur}),(t-${tStart})/${fadeDur},if(lt(t,${tEnd - fadeDur}),1,if(lt(t,${tEnd}),(${tEnd}-t)/${fadeDur},0))))`;
+        // Loop count depends on video length vs audio length
+        // This is complex for timeline. For now, we rely on -stream_loop on the CONCATENATED output or input
+        const loopCount = Math.ceil(totalDuration / 10) + 1; // Rough estimate for single input
 
         // 5. Build FFmpeg Command
-        const musicInputs = musicPaths.map(p => `-i "${p}"`).join(' ');
-        const musicConcatInputs = musicPaths.map((_, i) => `[${i + 1}:a]`).join('');
-        const musicConcat = musicPaths.length > 0
-            ? `${musicConcatInputs}concat=n=${musicPaths.length}:v=0:a=1[a]`
-            : '';
+        // Inputs: [0..N] are Video inputs, [N+1..M] are Audio inputs
+        const inputs = [
+            ...videoInputs.map(v => {
+                // Apply loop if requested (Simplistic support for single items or mapped inputs)
+                // Note: -stream_loop must come BEFORE -i
+                // -1 means infinite loop (ffmpeg limits it to output duration)
+                const loopFlag = v.loop ? `-stream_loop ${loopCount}` : '';
+                return `${loopFlag} -i "${v.path}"`;
+            }),
+            ...musicPaths.map(m => `-i "${m}"`),
+            ...Array.from(overlayImagePaths.values()).map(p => `-i "${p}"`)
+        ];
 
-        // Note: fontpath is safe in /tmp
-        // Reverting to simple drawtext to ensure stability (complex filters/alpha causing crash)
-        // Font: Playfair Display, Position: Lower Center
-        let filterComplex = `[0:v]trim=0:${totalDuration},setpts=PTS-STARTPTS,drawtext=fontfile='${fontPath}':text='${cleanTitle}':fontsize=80:fontcolor=white:borderw=2:bordercolor=black:x=(w-text_w)/2:y=(h-text_h)/2+150[v]`;
+        let filterComplex = '';
+        let videoMap = '[v]'; // Final video stream label
 
-        if (musicConcat) {
-            filterComplex += `;${musicConcat}`;
+        // --- Video Processing ---
+        // Concatenate Timeline
+        let concatParts = '';
+
+        // Normalize all inputs to same resolution/fps to allow concat
+        // Scale to 1080x1920 (Shorts)
+        const width = 1080;
+        const height = 1920;
+
+        for (let i = 0; i < videoInputs.length; i++) {
+            const item = videoInputs[i];
+            const inputLabel = `[${i}:v]`; // This input already has stream_loop applied if needed
+            const scaledLabel = `[v${i}]`;
+
+            // Scale filters
+            filterComplex += `${inputLabel}scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},setsar=1${scaledLabel};`;
+
+            // Should we trim it if it has a specific duration?
+            // If item.duration is set and it's an image, stream_loop handles repetition but not duration cut?
+            // Actually stream_loop repeats the input stream.
+            // If it's a static image, -loop 1 is usually used for infinite stream, then -t to cut.
+            // worker currently relies on stream_loop for video.
+            // For images in slideshow, we might lack the -loop 1 or -t flags if we just downloaded the jpg.
+            // But downloadFile saves it as jpg. ffmpeg -i image.jpg gives 1 frame.
+            // stream_loop on 1 frame might not work as expected for "duration".
+            // Ideally we need `loop=loop=${duration*fps}:size=1:start=0` filter or -loop 1 input option.
+
+            concatParts += `${scaledLabel}`;
         }
 
+        // Concat only if we have multiple parts, otherwise pass through
+        // If single part, [v0] is our base.
+        if (videoInputs.length > 1) {
+            filterComplex += `${concatParts}concat=n=${videoInputs.length}:v=1:a=0[vbase];`;
+            videoMap = '[vbase]';
+        } else {
+            videoMap = '[v0]';
+        }
+
+        // Re-construct inputs string 
+        // We embedded stream_loop in the inputs array map above.
+        let inputString = inputs.join(' ');
+
+
+        // --- Overlays ---
+        let lastStream = videoMap;
+        if (isAdvanced && overlays.length > 0) {
+            // Apply overlays
+            // We need to strip brackets from lastStream for use inside filter chain?
+            // No, `[vbase]drawtext...[vnext]`
+
+            // Offset for overlay inputs in the ffmpeg input list
+            // Video inputs + Music inputs
+            let overlayInputOffset = videoInputs.length + musicPaths.length;
+            let currentOvImgIndex = 0; // To track which Map entry corresponds to input index
+
+            overlays.forEach((ov, idx) => {
+                const nextLabel = `[vov${idx}]`;
+
+                // Position logic
+                let x = '(w-text_w)/2';
+                let y = '(h-text_h)/2';
+
+                if (ov.position === 'top-left') { x = '50'; y = '50'; }
+                if (ov.position === 'top-center') { x = '(w-text_w)/2'; y = '50'; }
+                if (ov.position === 'top-right') { x = 'w-text_w-50'; y = '50'; }
+                if (ov.position === 'center') { x = '(w-text_w)/2'; y = '(h-text_h)/2'; }
+                if (ov.position === 'bottom-center') { x = '(w-text_w)/2'; y = 'h-text_h-150'; }
+
+                // Timing
+                const startTime = typeof ov.start_time === 'number' ? ov.start_time :
+                    typeof ov.startTime === 'number' ? ov.startTime : 0;
+                const duration = typeof ov.duration === 'number' ? ov.duration : 5;
+                const endTime = startTime + duration;
+
+                // Fade Logic (1s fade in/out)
+                const fadeDuration = 1;
+                // Alpha expression for text: 
+                // if t < start+1: fade in
+                // if t > end-1: fade out
+                // else 1
+                const alphaExpr = `if(lt(t,${startTime + fadeDuration}),(t-${startTime})/${fadeDuration},if(lt(t,${endTime - fadeDuration}),1,(${endTime}-t)/${fadeDuration}))`;
+
+                const enable = `enable='between(t,${startTime},${endTime})'`;
+
+                if (ov.type === 'text') {
+                    // Escape text
+                    const safeText = (ov.content || '').replace(/'/g, "\\'").replace(/:/g, "\\:");
+
+                    filterComplex += `${lastStream}drawtext=fontfile='${fontPath}':text='${safeText}':fontsize=${ov.fontSize || ov.style?.fontSize || 60}:fontcolor=${ov.color || ov.style?.color || 'white'}@${alphaExpr}:borderw=2:bordercolor=black@${alphaExpr}:x=${x}:y=${y}:${enable}${nextLabel};`;
+                    lastStream = nextLabel;
+                } else if (ov.type === 'image' && overlayImagePaths.has(idx)) {
+                    // Image Overlay
+                    const inputIdx = overlayInputOffset + currentOvImgIndex;
+                    currentOvImgIndex++;
+
+                    const ovImgLabel = `[ovimg${idx}]`;
+                    const ovFadedLabel = `[ovimgfade${idx}]`;
+
+                    // 1. Loop image to be video stream
+                    // 2. Scale image if needed (optional, keeping original size for now or scaling to logic?)
+                    // Let's map it to reasonable max width e.g., 500? Or just use as is. 
+                    // Using as is for now as requested.
+                    // 3. Fade in/out
+
+                    // Note: 'loop' filter loops the input. 'setsar=1' good practice.
+                    // fade=in:st=START:d=1:alpha=1
+                    filterComplex += `[${inputIdx}:v]loop=loop=-1:size=1:start=0,fade=in:st=${startTime}:d=${fadeDuration}:alpha=1,fade=out:st=${endTime - fadeDuration}:d=${fadeDuration}:alpha=1${ovFadedLabel};`;
+
+                    // 4. Overlay
+                    // For image overlays, x/y logic might need w/h of the overlay input.
+                    // 'overlay' filter variables: main_w/h (W/H), overlay_w/h (w/h).
+                    // Our x/y logic above uses text_w/text_h. For images, we should use w/h (of overlay).
+                    const imgX = x.replace(/text_w/g, 'w').replace(/text_h/g, 'h');
+                    const imgY = y.replace(/text_w/g, 'w').replace(/text_h/g, 'h');
+
+                    filterComplex += `${lastStream}${ovFadedLabel}overlay=x=${imgX}:y=${imgY}:${enable}${nextLabel};`;
+                    lastStream = nextLabel;
+                }
+            });
+            videoMap = lastStream;
+        } else if (!isAdvanced) {
+            // Legacy Title Overlay
+            const cleanTitle = (job.title_text || '').replace(/'/g, "'\\''");
+            const nextLabel = '[vtitle]';
+            filterComplex += `${lastStream}trim=0:${totalDuration},setpts=PTS-STARTPTS,drawtext=fontfile='${fontPath}':text='${cleanTitle}':fontsize=80:fontcolor=white:borderw=2:bordercolor=black:x=(w-text_w)/2:y=(h-text_h)/2+150${nextLabel};`;
+            lastStream = nextLabel;
+            videoMap = lastStream;
+        }
+
+        // --- Audio ---
+        // Concatenate audio tracks
+        const audioOffset = videoInputs.length;
+        const musicConcatInputs = musicPaths.map((_, i) => `[${audioOffset + i}:a]`).join('');
+        const musicConcat = musicPaths.length > 0
+            ? `${musicConcatInputs}concat=n=${musicPaths.length}:v=0:a=1[aout]`
+            : '';
+
+        if (musicConcat) {
+            filterComplex += musicConcat;
+        }
+
+        // --- Final Command ---
+        const mapV = `-map "${videoMap}"`;
+        const mapA = musicConcat ? `-map "[aout]"` : '';
+
         const outputPath = path.join(workDir, 'output.mp4');
-
-        // Note: Using "libx264" with higher compression (crf 28) to ensure we stay under Supabase 50MB limit
-        // preset fast for speed
-        let command = `ffmpeg -y -stream_loop ${loopCount} -i "${videoPath}" ${musicInputs} -filter_complex "${filterComplex}" -map "[v]"`;
-
-        if (musicConcat) command += ` -map "[a]"`;
-
-        command += ` -c:v libx264 -crf 28 -preset fast -c:a aac -b:a 128k -movflags +faststart -shortest "${outputPath}"`;
+        const command = `ffmpeg -y ${inputString} -filter_complex "${filterComplex}" ${mapV} ${mapA} -c:v libx264 -crf 28 -preset fast -c:a aac -b:a 128k -movflags +faststart -shortest "${outputPath}"`;
 
         console.log('Running FFmpeg...');
         console.log('Command:', command);
         execSync(command, { stdio: 'inherit' });
 
-        // 6. Upload Output
+        // 6. Upload
         console.log('Uploading output...');
         const fileBuffer = fs.readFileSync(outputPath);
-        const stats = fs.statSync(outputPath);
-        console.log(`Video Size: ${(stats.size / 1024 / 1024).toFixed(2)} MB`);
-
-        const fileName = `${job.project_id}/${jobId}/output.mp4`; // Structured by project/job
-
-        const { error: uploadError } = await supabase.storage
-            .from('videos') // Try 'videos' first
-            .upload(fileName, fileBuffer, { contentType: 'video/mp4', upsert: true });
-
-        // Wait, I don't know if 'videos' bucket exists.
-        // Let's use the 'audio' bucket but put it in a 'videos/' folder to be safe since I know 'audio' exists and is public.
+        const fileName = `${job.project_id}/${jobId}/output.mp4`;
         const safeBucket = 'audio';
-        const safePath = `videos/${jobId}_output.mp4`;
+        const safePath = `videos/${jobId}_output.mp4`; // Using flat structure for safety
 
         const { error: upError } = await supabase.storage
             .from(safeBucket)
@@ -188,9 +381,7 @@ async function processJob(job) {
             duration_seconds: totalDuration
         }).eq('id', jobId);
 
-        if (finalUpdateError) {
-            throw new Error('Final DB Update Failed: ' + finalUpdateError.message);
-        }
+        if (finalUpdateError) throw new Error('Final DB Update Failed: ' + finalUpdateError.message);
 
         console.log('Job Complete! Video URL:', urlData.publicUrl);
 

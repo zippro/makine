@@ -27,7 +27,22 @@ export async function POST(
     { params }: { params: Promise<{ id: string }> }
 ) {
     const id = (await params).id;
-    const supabase = createClient();
+    const supabase = await createClient();
+
+    let body;
+    try {
+        body = await request.json();
+    } catch {
+        body = {};
+    }
+
+    const {
+        title: inputTitle,
+        description: inputDesc,
+        tags: inputTags,
+        privacyStatus: inputPrivacy,
+        publishAt
+    } = body;
 
     // 1. Get Job Details
     const { data: job, error: jobError } = await supabase
@@ -51,7 +66,6 @@ export async function POST(
     }
 
     // 2. Validate Credentials
-    // @ts-expect-error - Supabase join types are tricky
     const project = job.project;
     if (!project || !project.youtube_creds || !project.youtube_creds.refresh_token) {
         return NextResponse.json({ error: "YouTube credentials missing in Project Settings" }, { status: 400 });
@@ -74,10 +88,12 @@ export async function POST(
         const videoStream = Readable.fromWeb(videoResponse.body);
 
         // 5. Upload to YouTube
-        // Construct metadata (Title, Description)
-        // For now, simple title. Ideally we generate this via AI or user input
-        const title = job.title_text || `My Video ${new Date().toLocaleDateString()}`;
-        const description = `Created with Music Video Creator for project: ${project.name || 'Unknown'}\n\n#shorts`;
+        // Use input metadata or fallbacks
+        const title = inputTitle || job.title_text || `My Video ${new Date().toLocaleDateString()}`;
+        const description = inputDesc || `Created with Music Video Creator for project: ${project.name || 'Unknown'}\n\n#shorts`;
+        const tags = Array.isArray(inputTags) ? inputTags : ["music", "video", "creator"];
+
+        const privacyStatus = inputPrivacy || "private";
 
         const res = await youtube.videos.insert({
             part: ["snippet", "status"],
@@ -85,12 +101,13 @@ export async function POST(
                 snippet: {
                     title: title.substring(0, 100), // Max 100 chars
                     description: description,
-                    tags: ["music", "video", "creator"],
+                    tags: tags,
                     categoryId: "22", // People & Blogs
                 },
                 status: {
-                    privacyStatus: "private", // Default to private for safety
+                    privacyStatus: privacyStatus,
                     selfDeclaredMadeForKids: false,
+                    publishAt: publishAt || undefined, // Only for scheduled uploads
                 },
             },
             media: {
@@ -99,13 +116,6 @@ export async function POST(
         });
 
         // 6. Update Job with YouTube ID
-        // We'll store it in a new column or just 'metadata' if we had one. 
-        // For now, let's just return success. 
-        // OR we can misuse 'error_message' to store the link temporarily if we don't have a column?
-        // Let's rely on the user adding a 'youtube_id' column later or putting it in assets/metadata.
-        // Given we just added 'assets', let's try to put it there if we can update it safely.
-
-        // Actually, let's just log it and return it.
         console.log("Upload success:", res.data);
 
         return NextResponse.json({
