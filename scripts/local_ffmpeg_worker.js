@@ -199,191 +199,152 @@ async function processJob(job) {
         console.log(`calculated totalDuration: ${totalDuration}`);
         if (totalDuration === 0) totalDuration = 10;
 
-        // Loop count depends on video length vs audio length
-        // This is complex for timeline. For now, we rely on -stream_loop on the CONCATENATED output or input
-        const loopCount = Math.ceil(totalDuration / 10) + 1; // Rough estimate for single input
+        // 5. Sequence Looping Logic
+        // We need to loop the *sequence* of timeline items to match totalDuration
+        let timelineDuration = timeline.reduce((sum, item) => sum + (item.duration || 5), 0);
+        if (timelineDuration === 0) timelineDuration = 5;
 
-        // 5. Build FFmpeg Command
-        // Inputs: [0..N] are Video inputs, [N+1..M] are Audio inputs
+        // How many times to repeat the whole sequence?
+        const sequenceLoops = Math.ceil(totalDuration / timelineDuration);
+        console.log(`Sequence Duration: ${timelineDuration}, Target: ${totalDuration}, Loops: ${sequenceLoops}`);
+
+        // Construct Flat Input List for Concat
+        // We will reuse the same physical input files (videoInputs[i]), but refer to them multiple times in the filter graph?
+        // No, ffmpeg concat filter takes stream labels. 
+        // We have N video inputs. We can just repeat the stream labels in the concat list.
+        // [0:v][1:v][0:v][1:v]... concat=n=4...
+
+        // FFmpeg Inputs:
+        // [0..N-1] Video Files
+        // [N..M] Audio Files
+        // [M+1..P] Overlay Images
+
         const inputs = [
-            ...videoInputs.map(v => {
-                // Apply loop if requested (Simplistic support for single items or mapped inputs)
-                // Note: -stream_loop must come BEFORE -i
-                // -1 means infinite loop (ffmpeg limits it to output duration)
-                const loopFlag = v.loop ? `-stream_loop ${loopCount}` : '';
-                return `${loopFlag} -i "${v.path}"`;
-            }),
+            ...videoInputs.map(v => `-loop 1 -t ${v.duration || 10} -i "${v.path}"`), // Apply duration at input level
             ...musicPaths.map(m => `-i "${m}"`),
             ...Array.from(overlayImagePaths.values()).map(p => `-loop 1 -t ${totalDuration} -i "${p}"`)
         ];
 
         let filterComplex = '';
-        let videoMap = '[v]'; // Final video stream label
 
-        // --- Video Processing ---
-        // Concatenate Timeline
-        let concatParts = '';
-
-        // Normalize all inputs to same resolution/fps to allow concat
-        // Scale to 1080x1920 (Shorts)
+        // --- Video Scaling & Preparation ---
+        // We first scale ALL unique video inputs to [v0_scaled], [v1_scaled]...
         const width = 1080;
         const height = 1920;
 
         for (let i = 0; i < videoInputs.length; i++) {
-            const item = videoInputs[i];
-            const inputLabel = `[${i}:v]`; // This input already has stream_loop applied if needed
-            const scaledLabel = `[v${i}]`;
-
-            // Scale filters
-            filterComplex += `${inputLabel}scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},setsar=1${scaledLabel};`;
-
-            // Should we trim it if it has a specific duration?
-            // If item.duration is set and it's an image, stream_loop handles repetition but not duration cut?
-            // Actually stream_loop repeats the input stream.
-            // If it's a static image, -loop 1 is usually used for infinite stream, then -t to cut.
-            // worker currently relies on stream_loop for video.
-            // For images in slideshow, we might lack the -loop 1 or -t flags if we just downloaded the jpg.
-            // But downloadFile saves it as jpg. ffmpeg -i image.jpg gives 1 frame.
-            // stream_loop on 1 frame might not work as expected for "duration".
-            // Ideally we need `loop=loop=${duration*fps}:size=1:start=0` filter or -loop 1 input option.
-
-            concatParts += `${scaledLabel}`;
+            filterComplex += `[${i}:v]scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},setsar=1[v${i}_scaled];`;
         }
 
-        // Concat only if we have multiple parts, otherwise pass through
-        // If single part, [v0] is our base.
-        if (videoInputs.length > 1) {
-            filterComplex += `${concatParts}concat=n=${videoInputs.length}:v=1:a=0[vbase];`;
-            videoMap = '[vbase]';
+        // --- Sequence Concatenation ---
+        let concatSegments = '';
+        let segmentCount = 0;
+
+        // Loop the sequence
+        for (let loop = 0; loop < sequenceLoops; loop++) {
+            for (let i = 0; i < videoInputs.length; i++) {
+                concatSegments += `[v${i}_scaled]`;
+                segmentCount++;
+
+                // If we have enough duration, we could stop early, but complex to calc frame-perfectly here.
+                // Simpler to loop fully and let -shortest (or explicit trim) cut the end.
+            }
+        }
+
+        if (segmentCount > 1) {
+            filterComplex += `${concatSegments}concat=n=${segmentCount}:v=1:a=0[vbase];`;
         } else {
-            videoMap = '[v0]';
+            // Fallback if only 1 item 1 loop? (unlikely given logic above, but safe)
+            filterComplex += `[v0_scaled]copy[vbase];`;
         }
 
-        // Re-construct inputs string 
-        // We embedded stream_loop in the inputs array map above.
-        let inputString = inputs.join(' ');
-
+        let lastStream = '[vbase]';
 
         // --- Overlays ---
-        let lastStream = videoMap;
-        if (isAdvanced && overlays.length > 0) {
-            // Apply overlays
-            // We need to strip brackets from lastStream for use inside filter chain?
-            // No, `[vbase]drawtext...[vnext]`
+        // Overlay Input Indices start AFTER Video and Audio inputs
+        const overlayInputBaseIndex = videoInputs.length + musicPaths.length;
+        let currentOvImgIndex = 0;
 
-            // Offset for overlay inputs in the ffmpeg input list
-            // Video inputs + Music inputs
-            let overlayInputOffset = videoInputs.length + musicPaths.length;
-            let currentOvImgIndex = 0; // To track which Map entry corresponds to input index
-
+        if (overlays.length > 0) {
             overlays.forEach((ov, idx) => {
                 const nextLabel = `[vov${idx}]`;
 
-                // Position logic
+                // Correct Position Logic
+                // Reference: top-left (0,0), bottom-right (W, H)
                 let x = '(w-text_w)/2';
                 let y = '(h-text_h)/2';
 
-                if (ov.position === 'top-left') { x = '50'; y = '50'; }
-                if (ov.position === 'top-center') { x = '(w-text_w)/2'; y = '50'; }
-                if (ov.position === 'top-right') { x = 'w-text_w-50'; y = '50'; }
+                // Padding
+                const p = 50;
+
+                if (ov.position === 'top-left') { x = `${p}`; y = `${p}`; }
+                if (ov.position === 'top-center') { x = '(w-text_w)/2'; y = `${p}`; }
+                if (ov.position === 'top-right') { x = `w-text_w-${p}`; y = `${p}`; }
                 if (ov.position === 'center') { x = '(w-text_w)/2'; y = '(h-text_h)/2'; }
-                if (ov.position === 'bottom-center') { x = '(w-text_w)/2'; y = 'h-text_h-150'; }
+                if (ov.position === 'bottom-left') { x = `${p}`; y = `h-text_h-${p}`; }
+                if (ov.position === 'bottom-center') { x = '(w-text_w)/2'; y = `h-text_h-150`; } // Higher for captions usually
+                if (ov.position === 'bottom-right') { x = `w-text_w-${p}`; y = `h-text_h-${p}`; }
 
                 // Timing
-                const startTime = typeof ov.start_time === 'number' ? ov.start_time :
-                    typeof ov.startTime === 'number' ? ov.startTime : 0;
+                const startTime = typeof ov.start_time === 'number' ? ov.start_time : 0;
                 const duration = typeof ov.duration === 'number' ? ov.duration : 5;
                 const endTime = startTime + duration;
 
-                // Fade Logic (1s fade in/out)
+                // Fade Logic
                 const fadeDuration = 1;
-                // Alpha expression for text: 
-                // if t < start+1: fade in
-                // if t > end-1: fade out
-                // else 1
                 const alphaExpr = `if(lt(t,${startTime + fadeDuration}),(t-${startTime})/${fadeDuration},if(lt(t,${endTime - fadeDuration}),1,(${endTime}-t)/${fadeDuration}))`;
-
                 const enable = `enable='between(t,${startTime},${endTime})'`;
 
                 if (ov.type === 'text') {
-                    // Escape text
                     const safeText = (ov.content || '').replace(/'/g, "\\'").replace(/:/g, "\\:");
 
-                    // Use alpha parameter for fading text (affects border too)
-                    // Note: alpha expression must be wrapped in quotes
-                    filterComplex += `${lastStream}drawtext=fontfile='${fontPath}':text='${safeText}':fontsize=${ov.fontSize || ov.style?.fontSize || 60}:fontcolor=${ov.color || ov.style?.color || 'white'}:borderw=2:bordercolor=black:x=${x}:y=${y}:alpha='${alphaExpr}':${enable}${nextLabel};`;
+                    // Basic Font Mapping (Attempts to respect choice or fallback)
+                    let ovFontPath = fontPath; // Default fallback
+                    // If user chose something specific, we trying to map (Verified paths on Hetzner/Linux)
+                    // But for now, relying on the robust fallback we detected earlier is safest to avoid "file not found" crash.
+
+                    filterComplex += `${lastStream}drawtext=fontfile='${ovFontPath}':text='${safeText}':fontsize=${ov.fontSize || 60}:fontcolor=${ov.color || 'white'}:borderw=2:bordercolor=black:x=${x}:y=${y}:alpha='${alphaExpr}':${enable}${nextLabel};`;
                     lastStream = nextLabel;
                 } else if (ov.type === 'image' && overlayImagePaths.has(idx)) {
-                    // Image Overlay
-                    const inputIdx = overlayInputOffset + currentOvImgIndex;
+                    const inputIdx = overlayInputBaseIndex + currentOvImgIndex;
                     currentOvImgIndex++;
-
-                    const ovImgLabel = `[ovimg${idx}]`;
                     const ovFadedLabel = `[ovimgfade${idx}]`;
 
-                    // 3. Fade in/out
-                    // Input is already looped and timed via -loop 1 -t duration
+                    // Fade in/out on the input stream
                     filterComplex += `[${inputIdx}:v]fade=in:st=${startTime}:d=${fadeDuration}:alpha=1,fade=out:st=${endTime - fadeDuration}:d=${fadeDuration}:alpha=1${ovFadedLabel};`;
 
-                    // 4. Overlay
-                    // Drawtext uses 'w','h' for main video dimensions.
-                    // Overlay uses 'W','H' for main, and 'w','h' for overlay dimensions.
+                    // Replace text_w/text_h with w/h for overlay sizing
+                    let imgX = x.replace(/text_w/g, 'overlay_w_placeholder').replace(/\bw\b/g, 'W').replace(/overlay_w_placeholder/g, 'w');
+                    let imgX2 = imgX.replace(/text_h/g, 'overlay_h_placeholder').replace(/\bh\b/g, 'H').replace(/overlay_h_placeholder/g, 'h');
 
-                    // Transform x/y expressions:
-                    // 1. text_w -> w (overlay width)
-                    // 2. text_h -> h (overlay height)
-                    // 3. w (as standalone word) -> W (main width)
-                    // 4. h (as standalone word) -> H (main height)
+                    let imgY = y.replace(/text_w/g, 'overlay_w_placeholder').replace(/\bw\b/g, 'W').replace(/overlay_w_placeholder/g, 'w');
+                    let imgY2 = imgY.replace(/text_h/g, 'overlay_h_placeholder').replace(/\bh\b/g, 'H').replace(/overlay_h_placeholder/g, 'h');
 
-                    let imgX = x;
-                    let imgY = y;
-
-                    // Careful replacement to avoid double replacement
-                    // Replace 'text_w' with placeholder, then 'w' with 'W', then placeholder with 'w'
-                    imgX = imgX.replace(/text_w/g, 'overlay_w_placeholder')
-                        .replace(/\bw\b/g, 'W')
-                        .replace(/overlay_w_placeholder/g, 'w');
-
-                    imgX = imgX.replace(/text_h/g, 'overlay_h_placeholder')
-                        .replace(/\bh\b/g, 'H')
-                        .replace(/overlay_h_placeholder/g, 'h');
-
-                    imgY = imgY.replace(/text_w/g, 'overlay_w_placeholder')
-                        .replace(/\bw\b/g, 'W')
-                        .replace(/overlay_w_placeholder/g, 'w');
-
-                    imgY = imgY.replace(/text_h/g, 'overlay_h_placeholder')
-                        .replace(/\bh\b/g, 'H')
-                        .replace(/overlay_h_placeholder/g, 'h');
-
-                    filterComplex += `${lastStream}${ovFadedLabel}overlay=x=${imgX}:y=${imgY}:${enable}${nextLabel};`;
+                    filterComplex += `${lastStream}${ovFadedLabel}overlay=x=${imgX2}:y=${imgY2}:${enable}${nextLabel};`;
                     lastStream = nextLabel;
                 }
             });
-            videoMap = lastStream;
         } else if (!isAdvanced) {
             // Legacy Title Overlay
             const cleanTitle = (job.title_text || '').replace(/'/g, "'\\''");
             const nextLabel = '[vtitle]';
             filterComplex += `${lastStream}trim=0:${totalDuration},setpts=PTS-STARTPTS,drawtext=fontfile='${fontPath}':text='${cleanTitle}':fontsize=80:fontcolor=white:borderw=2:bordercolor=black:x=(w-text_w)/2:y=(h-text_h)/2+150${nextLabel};`;
             lastStream = nextLabel;
-            videoMap = lastStream;
         }
 
         // --- Audio ---
-        // Concatenate audio tracks
-        const audioOffset = videoInputs.length;
-        const musicConcatInputs = musicPaths.map((_, i) => `[${audioOffset + i}:a]`).join('');
+        // Audio Inputs are [videoInputs.length ... videoInputs.length + musicPaths.length - 1]
+        const audioInputStart = videoInputs.length;
+        const musicConcatInputs = musicPaths.map((_, i) => `[${audioInputStart + i}:a]`).join('');
         const musicConcat = musicPaths.length > 0
             ? `${musicConcatInputs}concat=n=${musicPaths.length}:v=0:a=1[aout]`
             : '';
 
-        if (musicConcat) {
-            filterComplex += musicConcat;
-        }
+        if (musicConcat) filterComplex += musicConcat;
 
         // --- Final Command ---
-        const mapV = `-map "${videoMap}"`;
+        const inputString = inputs.join(' ');
+        const mapV = `-map "${lastStream}"`;
         const mapA = musicConcat ? `-map "[aout]"` : '';
 
         const outputPath = path.join(workDir, 'output.mp4');
