@@ -450,34 +450,55 @@ export default function Home() {
             </div>
             <div className="p-4 overflow-y-auto max-h-[60vh]">
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-                {animations.map((anim) => (
-                  <button
-                    key={anim.id}
-                    onClick={() => {
-                      const mode = (currentProject as any)?.video_mode;
-                      if (!mode || mode === 'simple_animation') {
-                        setSelectedAnimation(anim.id);
-                        setShowAnimationPicker(false);
-                      } else {
-                        addAssetToPlaylist(anim);
-                        // Don't close modal in multi-mode so user can pick more
-                        // setShowAnimationPicker(false);
-                      }
-                    }}
-                    className={`rounded-xl overflow-hidden border-2 transition-all relative ${selectedAnimation === anim.id ? 'border-primary ring-2 ring-primary/20' : 'border-border hover:border-primary'}`}
-                  >
-                    <div className="aspect-video bg-black relative">
-                      <video src={anim.url!} className="w-full h-full object-cover" muted loop onMouseEnter={e => e.currentTarget.play()} onMouseLeave={e => e.currentTarget.pause()} />
-                    </div>
-                    <div className="p-2 bg-card text-left">
-                      <p className="text-sm font-medium">{anim.images?.filename || 'Animation'}</p>
-                    </div>
-                    <div className="absolute top-2 right-2 bg-black/60 text-white text-xs px-2 py-1 rounded-full flex items-center gap-1 backdrop-blur-sm">
-                      <Video className="w-3 h-3" />
-                      {anim.video_usage_count || 0}
-                    </div>
-                  </button>
-                ))}
+                {animations.map((anim) => {
+                  const mode = (currentProject as any)?.video_mode;
+                  const isMulti = mode && mode !== 'simple_animation';
+                  const isSelected = isMulti
+                    ? ((currentProject as any)?.template_assets || []).some((a: any) => a.url === anim.url)
+                    : selectedAnimation === anim.id;
+
+                  return (
+                    <button
+                      key={anim.id}
+                      onClick={() => {
+                        if (!mode || mode === 'simple_animation') {
+                          setSelectedAnimation(anim.id);
+                          setShowAnimationPicker(false);
+                        } else {
+                          addAssetToPlaylist(anim);
+                          // Don't close modal in multi-mode
+                        }
+                      }}
+                      className={`group rounded-xl overflow-hidden border-2 transition-all relative ${isSelected
+                        ? 'border-primary ring-2 ring-primary/20 scale-[0.98]'
+                        : 'border-border hover:border-primary'}`}
+                    >
+                      <div className="aspect-video bg-black relative">
+                        <video src={anim.url!} className="w-full h-full object-cover" muted loop onMouseEnter={e => e.currentTarget.play()} onMouseLeave={e => e.currentTarget.pause()} />
+
+                        {/* Selected Checkmark Overlay */}
+                        {isSelected && (
+                          <div className="absolute inset-0 bg-primary/20 backdrop-blur-[1px] flex items-center justify-center">
+                            <div className="bg-primary text-white p-2 rounded-full shadow-lg scale-100 animate-in fade-in zoom-in duration-200">
+                              <Check className="w-6 h-6" />
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                      <div className="p-2 bg-card text-left">
+                        <p className="text-sm font-medium truncate">{anim.images?.filename || 'Animation'}</p>
+                      </div>
+
+                      {/* Usage Count Badge */}
+                      {!isSelected && (
+                        <div className="absolute top-2 right-2 bg-black/60 text-white text-xs px-2 py-1 rounded-full flex items-center gap-1 backdrop-blur-sm">
+                          <Video className="w-3 h-3" />
+                          {anim.video_usage_count || 0}
+                        </div>
+                      )}
+                    </button>
+                  );
+                })}
               </div>
             </div>
           </div>
