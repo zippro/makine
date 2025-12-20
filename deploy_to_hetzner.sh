@@ -15,7 +15,7 @@ echo "⚠️  You will be asked for the server password multiple times."
 echo "📦 Installing Dependencies on Server..."
 ssh root@$SERVER_IP <<EOF
     apt-get update
-    apt-get install -y curl ffmpeg
+    apt-get install -y curl ffmpeg fonts-dejavu fonts-liberation
     # Install Node.js 20
     curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
     apt-get install -y nodejs

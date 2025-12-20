@@ -82,8 +82,22 @@ async function processJob(job) {
         // Logic update: We treat everything as "Advanced" pipeline essentially, 
         // to support overlays on simple animations too.
 
-        // 3a. Use Local System Font
-        const fontPath = '/System/Library/Fonts/Supplemental/Georgia.ttf';
+        // 3a. Use System Font (Fallback for Linux/Mac)
+        let fontPath = '/System/Library/Fonts/Supplemental/Georgia.ttf';
+        if (!fs.existsSync(fontPath)) {
+            // Fallback for Linux (Ubuntu/Debian)
+            // Try DejaVuSans (common) or LiberationSans
+            if (fs.existsSync('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf')) {
+                fontPath = '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf';
+            } else if (fs.existsSync('/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf')) {
+                fontPath = '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf';
+            } else {
+                // Last resort: standard sans-serif (might depend on ffmpeg config, but usually explicitly needing a file)
+                // We'll try a generic path often found in docker images
+                fontPath = '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf';
+            }
+        }
+        console.log('Using Font:', fontPath);
 
         // 3b. Download Video Assets
         console.log(isAdvanced ? `Downloading ${timeline.length} timeline assets...` : 'Downloading single asset...');
