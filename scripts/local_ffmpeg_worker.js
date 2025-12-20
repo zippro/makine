@@ -214,57 +214,50 @@ async function processJob(job) {
         // We have N video inputs. We can just repeat the stream labels in the concat list.
         // [0:v][1:v][0:v][1:v]... concat=n=4...
 
-        // FFmpeg Inputs:
-        // [0..N-1] Video Files
-        // [N..M] Audio Files
+        // 5. Build Inputs using Concat Demuxer for Video Sequence
+        // This avoids complex filter graph splitting for repeated inputs
+
+        const concatFilePath = path.join(workDir, 'concat.txt');
+        let concatContent = '';
+
+        // Loop the sequence in the file list
+        for (let loop = 0; loop < sequenceLoops; loop++) {
+            for (let i = 0; i < videoInputs.length; i++) {
+                concatContent += `file '${videoInputs[i].path}'\n`;
+            }
+        }
+
+        fs.writeFileSync(concatFilePath, concatContent);
+
+        // Inputs:
+        // [0] Concat List (Video Sequence)
+        // [1..M] Audio Files
         // [M+1..P] Overlay Images
 
-        // Fix: Video inputs should NOT be looped if we are concatenating them in sequence A-B-C-A-B-C
-        // They should be single play.
         const inputs = [
-            ...videoInputs.map(v => `-i "${v.path}"`), // Remove -loop 1/stream_loop, rely on filter graph repetition
+            `-f concat -safe 0 -i "${concatFilePath}"`,
             ...musicPaths.map(m => `-i "${m}"`),
             ...Array.from(overlayImagePaths.values()).map(p => `-loop 1 -t ${totalDuration} -i "${p}"`)
         ];
 
         let filterComplex = '';
 
-        // --- Video Scaling & Preparation ---
-        // We first scale ALL unique video inputs to [v0_scaled], [v1_scaled]...
+        // --- Video Processing ---
+        // Input [0:v] is now the fully looped sequence. Just scale it.
+        // Scale to 1920x1080 (16:9)
         const width = 1920;
         const height = 1080;
 
-        for (let i = 0; i < videoInputs.length; i++) {
-            filterComplex += `[${i}:v]scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},setsar=1[v${i}_scaled];`;
-        }
-
-        // --- Sequence Concatenation ---
-        let concatSegments = '';
-        let segmentCount = 0;
-
-        // Loop the sequence
-        for (let loop = 0; loop < sequenceLoops; loop++) {
-            for (let i = 0; i < videoInputs.length; i++) {
-                concatSegments += `[v${i}_scaled]`;
-                segmentCount++;
-
-                // If we have enough duration, we could stop early, but complex to calc frame-perfectly here.
-                // Simpler to loop fully and let -shortest (or explicit trim) cut the end.
-            }
-        }
-
-        if (segmentCount > 1) {
-            filterComplex += `${concatSegments}concat=n=${segmentCount}:v=1:a=0[vbase];`;
-        } else {
-            // Fallback if only 1 item 1 loop? (unlikely given logic above, but safe)
-            filterComplex += `[v0_scaled]copy[vbase];`;
-        }
+        // Single scale filter for the base video
+        // We use [v0_scaled] for consistency but it's really the only base.
+        filterComplex += `[0:v]scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},setsar=1[vbase];`;
 
         let lastStream = '[vbase]';
 
         // --- Overlays ---
-        // Overlay Input Indices start AFTER Video and Audio inputs
-        const overlayInputBaseIndex = videoInputs.length + musicPaths.length;
+        // Overlay Input Indices start AFTER Video (1 input) and Audio inputs
+        // Video is input 0.
+        const overlayInputBaseIndex = 1 + musicPaths.length;
         let currentOvImgIndex = 0;
 
         if (overlays.length > 0) {
@@ -335,8 +328,8 @@ async function processJob(job) {
         }
 
         // --- Audio ---
-        // Audio Inputs are [videoInputs.length ... videoInputs.length + musicPaths.length - 1]
-        const audioInputStart = videoInputs.length;
+        // Audio Inputs start at index 1 (since index 0 is video concat)
+        const audioInputStart = 1;
         const musicConcatInputs = musicPaths.map((_, i) => `[${audioInputStart + i}:a]`).join('');
         const musicConcat = musicPaths.length > 0
             ? `${musicConcatInputs}concat=n=${musicPaths.length}:v=0:a=1[aout]`
