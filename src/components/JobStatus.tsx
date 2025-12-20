@@ -169,12 +169,28 @@ export function JobStatus({ jobId, initialStatus = 'queued', onComplete }: JobSt
                 {status === 'processing' && (
                     <div className="flex flex-col items-end gap-1">
                         <div className="flex items-center gap-2">
+                            {/* Show percentage if available */}
+                            {typeof (job as any)?.progress === 'number' && (job as any).progress > 0 && (
+                                <span className="text-sm font-medium text-primary">
+                                    {(job as any).progress}%
+                                </span>
+                            )}
                             <span className="text-sm font-medium tabular-nums text-muted">
                                 {formatTime(elapsedSeconds)}
                             </span>
-                            <div className="w-32 h-2 rounded-full bg-border overflow-hidden">
-                                <div className="h-full w-full progress-bar" />
-                            </div>
+                        </div>
+                        {/* Progress Bar Container */}
+                        <div className="w-32 h-2 rounded-full bg-secondary overflow-hidden relative">
+                            {/* Indeterminate loader background */}
+                            <div className="absolute inset-0 h-full w-full bg-primary/20 animate-pulse" />
+
+                            {/* Actual percentage bar if available */}
+                            {typeof (job as any)?.progress === 'number' && (job as any).progress > 0 && (
+                                <div
+                                    className="absolute inset-y-0 left-0 bg-primary transition-all duration-500 ease-out"
+                                    style={{ width: `${(job as any).progress}%` }}
+                                />
+                            )}
                         </div>
                     </div>
                 )}
