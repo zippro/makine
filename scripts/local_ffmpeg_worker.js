@@ -214,7 +214,7 @@ async function processJob(job) {
                 return `${loopFlag} -i "${v.path}"`;
             }),
             ...musicPaths.map(m => `-i "${m}"`),
-            ...Array.from(overlayImagePaths.values()).map(p => `-i "${p}"`)
+            ...Array.from(overlayImagePaths.values()).map(p => `-loop 1 -t ${totalDuration} -i "${p}"`)
         ];
 
         let filterComplex = '';
@@ -322,9 +322,8 @@ async function processJob(job) {
                     const ovFadedLabel = `[ovimgfade${idx}]`;
 
                     // 3. Fade in/out
-                    // Note: 'loop' filter loops the input. 
-                    // loop=-1:size=1:start=0 loops the first frame infinitely
-                    filterComplex += `[${inputIdx}:v]loop=loop=-1:size=1:start=0,fade=in:st=${startTime}:d=${fadeDuration}:alpha=1,fade=out:st=${endTime - fadeDuration}:d=${fadeDuration}:alpha=1${ovFadedLabel};`;
+                    // Input is already looped and timed via -loop 1 -t duration
+                    filterComplex += `[${inputIdx}:v]fade=in:st=${startTime}:d=${fadeDuration}:alpha=1,fade=out:st=${endTime - fadeDuration}:d=${fadeDuration}:alpha=1${ovFadedLabel};`;
 
                     // 4. Overlay
                     // Drawtext uses 'w','h' for main video dimensions.
