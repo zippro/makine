@@ -349,31 +349,49 @@ async function processJob(job) {
         console.log('Command:', command);
         execSync(command, { stdio: 'inherit' });
 
-        // 6. Upload
+        // 6. Upload with Retry
         console.log('Uploading output...');
         const fileBuffer = fs.readFileSync(outputPath);
         const fileName = `${job.project_id}/${jobId}/output.mp4`;
         const safeBucket = 'audio';
-        const safePath = `videos/${jobId}_output.mp4`; // Using flat structure for safety
+        const safePath = `videos/${jobId}_output.mp4`;
 
-        const { error: upError } = await supabase.storage
-            .from(safeBucket)
-            .upload(safePath, fileBuffer, { contentType: 'video/mp4', upsert: true });
+        let uploadError = null;
+        let publicUrl = '';
 
-        if (upError) throw new Error('Upload failed: ' + upError.message);
+        for (let attempt = 1; attempt <= 3; attempt++) {
+            try {
+                console.log(`Upload attempt ${attempt}/3...`);
+                const { error: upError } = await supabase.storage
+                    .from(safeBucket)
+                    .upload(safePath, fileBuffer, { contentType: 'video/mp4', upsert: true });
 
-        const { data: urlData } = supabase.storage.from(safeBucket).getPublicUrl(safePath);
+                if (upError) throw upError;
+
+                const { data: urlData } = supabase.storage.from(safeBucket).getPublicUrl(safePath);
+                publicUrl = urlData.publicUrl;
+                uploadError = null;
+                console.log('Upload successful!');
+                break;
+            } catch (err) {
+                console.error(`Upload attempt ${attempt} failed:`, err.message);
+                uploadError = err;
+                if (attempt < 3) await new Promise(r => setTimeout(r, 2000 * attempt)); // Backoff
+            }
+        }
+
+        if (uploadError) throw new Error('Upload failed after 3 attempts: ' + uploadError.message);
 
         // 7. Update Job Status
         const { error: finalUpdateError } = await supabase.from('video_jobs').update({
             status: 'done',
-            video_url: urlData.publicUrl,
+            video_url: publicUrl,
             duration_seconds: totalDuration
         }).eq('id', jobId);
 
         if (finalUpdateError) throw new Error('Final DB Update Failed: ' + finalUpdateError.message);
 
-        console.log('Job Complete! Video URL:', urlData.publicUrl);
+        console.log('Job Complete! Video URL:', publicUrl);
 
     } catch (err) {
         console.error('Job Failed:', err);
