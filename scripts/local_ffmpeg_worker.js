@@ -309,7 +309,9 @@ async function processJob(job) {
                     // Escape text
                     const safeText = (ov.content || '').replace(/'/g, "\\'").replace(/:/g, "\\:");
 
-                    filterComplex += `${lastStream}drawtext=fontfile='${fontPath}':text='${safeText}':fontsize=${ov.fontSize || ov.style?.fontSize || 60}:fontcolor=${ov.color || ov.style?.color || 'white'}@${alphaExpr}:borderw=2:bordercolor=black@${alphaExpr}:x=${x}:y=${y}:${enable}${nextLabel};`;
+                    // Use alpha parameter for fading text (affects border too)
+                    // Note: alpha expression must be wrapped in quotes
+                    filterComplex += `${lastStream}drawtext=fontfile='${fontPath}':text='${safeText}':fontsize=${ov.fontSize || ov.style?.fontSize || 60}:fontcolor=${ov.color || ov.style?.color || 'white'}:borderw=2:bordercolor=black:x=${x}:y=${y}:alpha='${alphaExpr}':${enable}${nextLabel};`;
                     lastStream = nextLabel;
                 } else if (ov.type === 'image' && overlayImagePaths.has(idx)) {
                     // Image Overlay
@@ -319,22 +321,41 @@ async function processJob(job) {
                     const ovImgLabel = `[ovimg${idx}]`;
                     const ovFadedLabel = `[ovimgfade${idx}]`;
 
-                    // 1. Loop image to be video stream
-                    // 2. Scale image if needed (optional, keeping original size for now or scaling to logic?)
-                    // Let's map it to reasonable max width e.g., 500? Or just use as is. 
-                    // Using as is for now as requested.
                     // 3. Fade in/out
-
-                    // Note: 'loop' filter loops the input. 'setsar=1' good practice.
-                    // fade=in:st=START:d=1:alpha=1
+                    // Note: 'loop' filter loops the input. 
+                    // loop=-1:size=1:start=0 loops the first frame infinitely
                     filterComplex += `[${inputIdx}:v]loop=loop=-1:size=1:start=0,fade=in:st=${startTime}:d=${fadeDuration}:alpha=1,fade=out:st=${endTime - fadeDuration}:d=${fadeDuration}:alpha=1${ovFadedLabel};`;
 
                     // 4. Overlay
-                    // For image overlays, x/y logic might need w/h of the overlay input.
-                    // 'overlay' filter variables: main_w/h (W/H), overlay_w/h (w/h).
-                    // Our x/y logic above uses text_w/text_h. For images, we should use w/h (of overlay).
-                    const imgX = x.replace(/text_w/g, 'w').replace(/text_h/g, 'h');
-                    const imgY = y.replace(/text_w/g, 'w').replace(/text_h/g, 'h');
+                    // Drawtext uses 'w','h' for main video dimensions.
+                    // Overlay uses 'W','H' for main, and 'w','h' for overlay dimensions.
+
+                    // Transform x/y expressions:
+                    // 1. text_w -> w (overlay width)
+                    // 2. text_h -> h (overlay height)
+                    // 3. w (as standalone word) -> W (main width)
+                    // 4. h (as standalone word) -> H (main height)
+
+                    let imgX = x;
+                    let imgY = y;
+
+                    // Careful replacement to avoid double replacement
+                    // Replace 'text_w' with placeholder, then 'w' with 'W', then placeholder with 'w'
+                    imgX = imgX.replace(/text_w/g, 'overlay_w_placeholder')
+                        .replace(/\bw\b/g, 'W')
+                        .replace(/overlay_w_placeholder/g, 'w');
+
+                    imgX = imgX.replace(/text_h/g, 'overlay_h_placeholder')
+                        .replace(/\bh\b/g, 'H')
+                        .replace(/overlay_h_placeholder/g, 'h');
+
+                    imgY = imgY.replace(/text_w/g, 'overlay_w_placeholder')
+                        .replace(/\bw\b/g, 'W')
+                        .replace(/overlay_w_placeholder/g, 'w');
+
+                    imgY = imgY.replace(/text_h/g, 'overlay_h_placeholder')
+                        .replace(/\bh\b/g, 'H')
+                        .replace(/overlay_h_placeholder/g, 'h');
 
                     filterComplex += `${lastStream}${ovFadedLabel}overlay=x=${imgX}:y=${imgY}:${enable}${nextLabel};`;
                     lastStream = nextLabel;
