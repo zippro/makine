@@ -277,7 +277,7 @@ async function processJob(job) {
                 if (ov.position === 'top-right') { x = `w-text_w-${p}`; y = `${p}`; }
                 if (ov.position === 'center') { x = '(w-text_w)/2'; y = '(h-text_h)/2'; }
                 if (ov.position === 'bottom-left') { x = `${p}`; y = `h-text_h-${p}`; }
-                if (ov.position === 'bottom-center') { x = '(w-text_w)/2'; y = `h-text_h-150`; } // Higher for captions usually
+                if (ov.position === 'bottom-center') { x = '(w-text_w)/2'; y = `h-text_h-${p}`; }
                 if (ov.position === 'bottom-right') { x = `w-text_w-${p}`; y = `h-text_h-${p}`; }
 
                 // Timing
@@ -293,10 +293,8 @@ async function processJob(job) {
                 if (ov.type === 'text') {
                     const safeText = (ov.content || '').replace(/'/g, "\\'").replace(/:/g, "\\:");
 
-                    // Basic Font Mapping (Attempts to respect choice or fallback)
-                    let ovFontPath = fontPath; // Default fallback
-                    // If user chose something specific, we trying to map (Verified paths on Hetzner/Linux)
-                    // But for now, relying on the robust fallback we detected earlier is safest to avoid "file not found" crash.
+                    // Basic Font Mapping
+                    let ovFontPath = fontPath;
 
                     filterComplex += `${lastStream}drawtext=fontfile='${ovFontPath}':text='${safeText}':fontsize=${ov.fontSize || 60}:fontcolor=${ov.color || 'white'}:borderw=2:bordercolor=black:x=${x}:y=${y}:alpha='${alphaExpr}':${enable}${nextLabel};`;
                     lastStream = nextLabel;
@@ -306,7 +304,8 @@ async function processJob(job) {
                     const ovFadedLabel = `[ovimgfade${idx}]`;
 
                     // Fade in/out on the input stream
-                    filterComplex += `[${inputIdx}:v]fade=in:st=${startTime}:d=${fadeDuration}:alpha=1,fade=out:st=${endTime - fadeDuration}:d=${fadeDuration}:alpha=1${ovFadedLabel};`;
+                    // Explicit fade=t=in syntax
+                    filterComplex += `[${inputIdx}:v]fade=t=in:st=${startTime}:d=${fadeDuration}:alpha=1,fade=t=out:st=${endTime - fadeDuration}:d=${fadeDuration}:alpha=1${ovFadedLabel};`;
 
                     // Replace text_w/text_h with w/h for overlay sizing
                     let imgX = x.replace(/text_w/g, 'overlay_w_placeholder').replace(/\bw\b/g, 'W').replace(/overlay_w_placeholder/g, 'w');
@@ -338,16 +337,78 @@ async function processJob(job) {
         if (musicConcat) filterComplex += musicConcat;
 
         // --- Final Command ---
-        const inputString = inputs.join(' ');
-        const mapV = `-map "${lastStream}"`;
-        const mapA = musicConcat ? `-map "[aout]"` : '';
+        const inputArgs = [];
+        // Add inputs manually to args array
+        inputArgs.push('-f', 'concat', '-safe', '0', '-i', concatFilePath);
+        musicPaths.forEach(m => inputArgs.push('-i', m));
+        Array.from(overlayImagePaths.values()).forEach(p => {
+            inputArgs.push('-loop', '1', '-t', `${totalDuration}`, '-i', p);
+        });
+
+        const mapV = ['-map', `${lastStream}`];
+        const mapA = musicConcat ? ['-map', '[aout]'] : [];
 
         const outputPath = path.join(workDir, 'output.mp4');
-        const command = `ffmpeg -y ${inputString} -filter_complex "${filterComplex}" ${mapV} ${mapA} -c:v libx264 -crf 28 -preset fast -c:a aac -b:a 128k -movflags +faststart -shortest "${outputPath}"`;
 
-        console.log('Running FFmpeg...');
-        console.log('Command:', command);
-        execSync(command, { stdio: 'inherit' });
+        const ffmpegArgs = [
+            '-y',
+            ...inputArgs,
+            '-filter_complex', filterComplex,
+            ...mapV,
+            ...mapA,
+            '-c:v', 'libx264',
+            '-crf', '28',
+            '-preset', 'fast',
+            '-c:a', 'aac',
+            '-b:a', '128k',
+            '-movflags', '+faststart',
+            '-shortest',
+            outputPath
+        ];
+
+        console.log('Running FFmpeg with spawn...');
+        console.log('Args:', ffmpegArgs.join(' '));
+
+        await new Promise((resolve, reject) => {
+            const { spawn } = require('child_process');
+            const ffmpeg = spawn('ffmpeg', ffmpegArgs);
+
+            let lastProgressUpdate = 0;
+
+            ffmpeg.stderr.on('data', (data) => {
+                const output = data.toString();
+
+                // Parse time=HH:MM:SS.mm
+                const timeMatch = output.match(/time=(\d{2}):(\d{2}):(\d{2}\.\d{2})/);
+                if (timeMatch) {
+                    const hours = parseFloat(timeMatch[1]);
+                    const minutes = parseFloat(timeMatch[2]);
+                    const seconds = parseFloat(timeMatch[3]);
+                    const currentTime = (hours * 3600) + (minutes * 60) + seconds;
+
+                    const progress = Math.min(100, Math.round((currentTime / totalDuration) * 100));
+
+                    const now = Date.now();
+                    if (now - lastProgressUpdate > 3000 && progress > 0) { // Update every 3s
+                        lastProgressUpdate = now;
+                        console.log(`Progress: ${progress}%`);
+                        supabase.from('video_jobs')
+                            .update({ progress: progress })
+                            .eq('id', jobId)
+                            .then(({ error }) => {
+                                if (error) console.error('Failed to update progress:', error.message);
+                            });
+                    }
+                }
+            });
+
+            ffmpeg.on('close', (code) => {
+                if (code === 0) resolve();
+                else reject(new Error(`FFmpeg exited with code ${code}`));
+            });
+
+            ffmpeg.on('error', (err) => reject(err));
+        });
 
         // 6. Upload with Retry
         console.log('Uploading output...');
