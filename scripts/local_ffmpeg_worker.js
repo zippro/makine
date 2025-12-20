@@ -284,6 +284,7 @@ async function processJob(job) {
                 const startTime = typeof ov.start_time === 'number' ? ov.start_time : 0;
                 const duration = typeof ov.duration === 'number' ? ov.duration : 5;
                 const endTime = startTime + duration;
+                const enable = `between(t,${startTime},${endTime})`;
 
                 if (ov.type === 'text') {
                     const safeText = (ov.content || '').replace(/'/g, "\\'").replace(/:/g, "\\:");
