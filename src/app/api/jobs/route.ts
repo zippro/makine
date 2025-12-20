@@ -151,7 +151,7 @@ export async function POST(request: NextRequest) {
                 animation_id: videoMode === 'simple_animation' ? animation_id : null,
                 title_text,
                 project_id,
-                status: 'queued',
+                status: 'pending', // Set to pending initially to avoid race condition with worker
                 // Legacy fields shim
                 image_url: mainAnimationUrl || (assets[0]?.url) || '',
                 audio_url: orderedMusic[0]?.url || '',
@@ -187,6 +187,9 @@ export async function POST(request: NextRequest) {
         for (const musicId of music_ids) {
             await supabase.rpc('increment_music_usage', { mus_id: musicId });
         }
+
+        // Update status to queued now that all data is ready
+        await supabase.from('video_jobs').update({ status: 'queued' }).eq('id', job.id);
 
         return NextResponse.json(job, { status: 201 });
     } catch (error) {
