@@ -229,8 +229,8 @@ async function processJob(job) {
 
         // --- Video Scaling & Preparation ---
         // We first scale ALL unique video inputs to [v0_scaled], [v1_scaled]...
-        const width = 1080;
-        const height = 1920;
+        const width = 1920;
+        const height = 1080;
 
         for (let i = 0; i < videoInputs.length; i++) {
             filterComplex += `[${i}:v]scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},setsar=1[v${i}_scaled];`;
