@@ -285,27 +285,18 @@ async function processJob(job) {
                 const duration = typeof ov.duration === 'number' ? ov.duration : 5;
                 const endTime = startTime + duration;
 
-                // Fade Logic
-                const fadeDuration = 1;
-                const alphaExpr = `if(lt(t,${startTime + fadeDuration}),(t-${startTime})/${fadeDuration},if(lt(t,${endTime - fadeDuration}),1,(${endTime}-t)/${fadeDuration}))`;
-                const enable = `enable='between(t,${startTime},${endTime})'`;
-
                 if (ov.type === 'text') {
                     const safeText = (ov.content || '').replace(/'/g, "\\'").replace(/:/g, "\\:");
-
-                    // Basic Font Mapping
                     let ovFontPath = fontPath;
 
-                    filterComplex += `${lastStream}drawtext=fontfile='${ovFontPath}':text='${safeText}':fontsize=${ov.fontSize || 60}:fontcolor=${ov.color || 'white'}:borderw=2:bordercolor=black:x=${x}:y=${y}:alpha='${alphaExpr}':${enable}${nextLabel};`;
+                    filterComplex += `${lastStream}drawtext=fontfile='${ovFontPath}':text='${safeText}':fontsize=${ov.fontSize || 60}:fontcolor=${ov.color || 'white'}:borderw=2:bordercolor=black:x=${x}:y=${y}:enable='${enable}'${nextLabel};`;
                     lastStream = nextLabel;
                 } else if (ov.type === 'image' && overlayImagePaths.has(idx)) {
                     const inputIdx = overlayInputBaseIndex + currentOvImgIndex;
                     currentOvImgIndex++;
-                    const ovFadedLabel = `[ovimgfade${idx}]`;
 
-                    // Fade in/out on the input stream
-                    // Explicit fade=t=in syntax
-                    filterComplex += `[${inputIdx}:v]fade=t=in:st=${startTime}:d=${fadeDuration}:alpha=1,fade=t=out:st=${endTime - fadeDuration}:d=${fadeDuration}:alpha=1${ovFadedLabel};`;
+                    // Reverted Fade logic due to "flashing" reports. 
+                    // Verify transparency handling before re-enabling.
 
                     // Replace text_w/text_h with w/h for overlay sizing
                     let imgX = x.replace(/text_w/g, 'overlay_w_placeholder').replace(/\bw\b/g, 'W').replace(/overlay_w_placeholder/g, 'w');
@@ -314,7 +305,7 @@ async function processJob(job) {
                     let imgY = y.replace(/text_w/g, 'overlay_w_placeholder').replace(/\bw\b/g, 'W').replace(/overlay_w_placeholder/g, 'w');
                     let imgY2 = imgY.replace(/text_h/g, 'overlay_h_placeholder').replace(/\bh\b/g, 'H').replace(/overlay_h_placeholder/g, 'h');
 
-                    filterComplex += `${lastStream}${ovFadedLabel}overlay=x=${imgX2}:y=${imgY2}:${enable}${nextLabel};`;
+                    filterComplex += `${lastStream}[${inputIdx}:v]overlay=x=${imgX2}:y=${imgY2}:enable='${enable}'${nextLabel};`;
                     lastStream = nextLabel;
                 }
             });
