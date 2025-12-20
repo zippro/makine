@@ -219,8 +219,10 @@ async function processJob(job) {
         // [N..M] Audio Files
         // [M+1..P] Overlay Images
 
+        // Fix: Video inputs should NOT be looped if we are concatenating them in sequence A-B-C-A-B-C
+        // They should be single play.
         const inputs = [
-            ...videoInputs.map(v => `-loop 1 -t ${v.duration || 10} -i "${v.path}"`), // Apply duration at input level
+            ...videoInputs.map(v => `-i "${v.path}"`), // Remove -loop 1/stream_loop, rely on filter graph repetition
             ...musicPaths.map(m => `-i "${m}"`),
             ...Array.from(overlayImagePaths.values()).map(p => `-loop 1 -t ${totalDuration} -i "${p}"`)
         ];
