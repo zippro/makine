@@ -267,69 +267,78 @@ export default function AnimationsPage() {
     const visibleFiles = getFolderContents(animations, currentFolder);
 
     return (
-        <div className="min-h-screen bg-background">
-            <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
+        <div className="min-h-screen bg-[#0a0a0a] text-white selection:bg-purple-500/30">
+            {/* Background Gradients - consistent with mpage */}
+            <div className="fixed inset-0 z-0 overflow-hidden pointer-events-none">
+                <div className="absolute top-0 right-1/4 w-[500px] h-[500px] bg-purple-600/10 rounded-full blur-[120px] mix-blend-screen" />
+                <div className="absolute bottom-0 left-1/4 w-[500px] h-[500px] bg-blue-600/5 rounded-full blur-[120px] mix-blend-screen" />
+            </div>
+
+            <div className="relative z-10 mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
                 {/* Header with Breadcrumbs */}
-                <div className="mb-8 flex items-center justify-between">
+                <div className="mb-10 flex flex-col md:flex-row md:items-center justify-between gap-4">
                     <div>
-                        <div className="flex items-center gap-2 mb-2">
-                            <h1 className="text-3xl font-bold text-foreground">Animations</h1>
+                        <div className="flex items-center gap-3 mb-2">
+                            <h1 className="text-4xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-white to-gray-400">
+                                Animations
+                            </h1>
                             {currentProject && (
-                                <div className="flex items-center gap-1 text-muted-foreground ml-4 bg-muted/20 px-3 py-1 rounded-full">
-                                    <span className="text-sm">/</span>
+                                <div className="flex items-center gap-2 text-gray-400 ml-2 px-3 py-1 rounded-full border border-white/5 bg-white/5 backdrop-blur-sm">
+                                    <span className="text-xs">/</span>
                                     {currentFolder !== '/' && (
-                                        <button onClick={() => setCurrentFolder(currentFolder.split('/').slice(0, -1).join('/') || '/')} className="text-sm hover:underline">
+                                        <button onClick={() => setCurrentFolder(currentFolder.split('/').slice(0, -1).join('/') || '/')} className="text-sm hover:text-white transition-colors">
                                             ...
                                         </button>
                                     )}
-                                    <span className="text-sm font-mono">{currentFolder}</span>
+                                    <span className="text-sm font-mono text-purple-200">{currentFolder}</span>
                                 </div>
                             )}
                         </div>
-                        <p className="text-muted mt-2">
-                            {currentProject ? `Project: ${currentProject.name}` : 'Select a project to view animations'}
-                        </p>
-                        <p className="text-muted mt-1">
-                            {animations.length} animation{animations.length !== 1 ? 's' : ''} •{' '}
-                            {animations.filter(a => a.is_approved).length} approved
+                        <p className="text-gray-400 text-sm">
+                            {currentProject ? `Project: ${currentProject.name}` : 'Select a project'} • {animations.length} items
                         </p>
                     </div>
 
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-3">
                         {currentFolder !== '/' && (
-                            <button onClick={() => setCurrentFolder(currentFolder.split('/').slice(0, -1).join('/') || '/')} className="px-4 py-2 border border-border rounded-lg hover:bg-muted font-medium transition-all">
-                                Up
+                            <button onClick={() => setCurrentFolder(currentFolder.split('/').slice(0, -1).join('/') || '/')} className="px-4 py-2 border border-white/10 rounded-xl hover:bg-white/5 text-sm font-medium transition-all text-gray-300">
+                                <ChevronUp className="w-4 h-4" /> Up
                             </button>
                         )}
-                        <button onClick={createFolder} className="px-4 py-2 border border-primary/20 bg-primary/10 text-primary rounded-lg hover:bg-primary/20 font-medium transition-all">
-                            + New Folder
+                        <button onClick={createFolder} className="px-4 py-2 border border-white/10 bg-white/5 text-white rounded-xl hover:bg-white/10 hidden md:block text-sm font-medium transition-all">
+                            New Folder
                         </button>
                         <a
                             href="/upload-images"
-                            className="btn-primary px-4 py-2 rounded-lg ml-2"
+                            className="px-5 py-2 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-medium shadow-lg shadow-purple-900/20 transition-all hover:scale-105 flex items-center gap-2"
                         >
-                            Upload Images
+                            <Video className="w-4 h-4" /> Upload
                         </a>
                     </div>
                 </div>
 
                 {error && (
-                    <div className="p-4 rounded-xl bg-error/10 border border-error/20 text-error mb-6">
+                    <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 mb-8 backdrop-blur-sm">
+                        <AlertCircle className="w-5 h-5 inline mr-2" />
                         {error}
                     </div>
                 )}
 
                 {/* Animations Grid */}
                 {animations.length === 0 ? (
-                    <div className="text-center py-16">
-                        <Video className="w-16 h-16 text-muted mx-auto mb-4" />
-                        <h2 className="text-xl font-semibold text-foreground">No animations yet</h2>
-                        <p className="text-muted mt-2">Upload images to generate animations</p>
+                    <div className="text-center py-20 border border-dashed border-white/10 rounded-3xl bg-white/5">
+                        <div className="w-20 h-20 bg-white/5 rounded-full flex items-center justify-center mx-auto mb-6">
+                            <Video className="w-10 h-10 text-gray-500" />
+                        </div>
+                        <h2 className="text-2xl font-bold text-white mb-2">No animations yet</h2>
+                        <p className="text-gray-400 max-w-md mx-auto mb-8">
+                            Upload images to generate stunning animations for your music videos.
+                        </p>
                         <a
                             href="/upload-images"
-                            className="btn-primary px-6 py-3 rounded-lg inline-block mt-4"
+                            className="inline-flex items-center gap-2 px-8 py-3 rounded-full bg-white text-black font-bold hover:bg-gray-200 transition-colors"
                         >
-                            Upload Images
+                            Get Started
                         </a>
                     </div>
                 ) : (
@@ -341,10 +350,12 @@ export default function AnimationsPage() {
                                 <div
                                     key={folderPath}
                                     onDoubleClick={() => setCurrentFolder(folderPath)}
-                                    className="rounded-xl border-2 border-dashed border-border p-6 flex flex-col items-center justify-center gap-4 hover:border-primary/50 hover:bg-primary/5 cursor-pointer transition-all aspect-video"
+                                    className="group relative rounded-2xl border border-white/10 bg-white/[0.02] p-6 flex flex-col items-center justify-center gap-4 hover:bg-white/[0.05] hover:border-purple-500/50 cursor-pointer transition-all aspect-video backdrop-blur-sm"
                                 >
-                                    <Video className="w-12 h-12 text-primary/50" />
-                                    <span className="font-medium text-foreground">{folderName}</span>
+                                    <div className="p-4 rounded-full bg-white/5 text-purple-400 group-hover:scale-110 group-hover:bg-purple-500/20 transition-all duration-300">
+                                        <ChevronDown className="w-8 h-8" />
+                                    </div>
+                                    <span className="font-medium text-gray-200 tracking-wide">{folderName}</span>
                                 </div>
                             )
                         })}
@@ -353,20 +364,22 @@ export default function AnimationsPage() {
                         {visibleFiles.map((animation) => (
                             <div
                                 key={animation.id}
-                                className="rounded-xl bg-card border border-border overflow-hidden"
+                                className="group relative rounded-2xl border border-white/10 bg-[#121212] overflow-hidden hover:border-white/20 hover:shadow-2xl transition-all duration-300"
                             >
                                 {/* Thumbnail/Video Preview */}
                                 <div
-                                    className="aspect-video bg-black relative cursor-pointer group"
+                                    className="aspect-video bg-black relative cursor-pointer overflow-hidden"
                                     onClick={() => animation.url && setSelectedAnimation(animation)}
                                 >
                                     {animation.url ? (
                                         <video
                                             src={animation.url}
-                                            className="w-full h-full object-cover"
+                                            className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity duration-500"
                                             muted
                                             loop
                                             playsInline
+                                            // FIX: Added poster for visibility before loading
+                                            poster={animation.thumbnail_url || animation.images?.url || undefined}
                                             onMouseEnter={(e) => e.currentTarget.play()}
                                             onMouseLeave={(e) => { e.currentTarget.pause(); e.currentTarget.currentTime = 0; }}
                                         />
@@ -375,140 +388,138 @@ export default function AnimationsPage() {
                                         <img
                                             src={animation.images.url}
                                             alt="Source"
-                                            className="w-full h-full object-cover opacity-50"
+                                            className="w-full h-full object-cover opacity-50 grayscale group-hover:grayscale-0 transition-all duration-500"
                                         />
                                     ) : (
-                                        <div className="w-full h-full flex items-center justify-center">
-                                            <Video className="w-12 h-12 text-muted" />
+                                        <div className="w-full h-full flex items-center justify-center bg-white/5">
+                                            <Video className="w-12 h-12 text-white/20" />
                                         </div>
                                     )}
 
                                     {/* Play overlay */}
                                     {animation.url && (
-                                        <div className="absolute inset-0 bg-black/30 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                                            <Play className="w-12 h-12 text-white" />
+                                        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                                            <div className="w-12 h-12 rounded-full bg-white/10 backdrop-blur-md flex items-center justify-center border border-white/20 opacity-0 group-hover:opacity-100 transition-all duration-300 scale-75 group-hover:scale-100">
+                                                <Play className="w-5 h-5 text-white ml-1" />
+                                            </div>
                                         </div>
                                     )}
 
                                     {/* Status Badge */}
-                                    <div className="absolute top-2 left-2">
+                                    <div className="absolute top-3 left-3">
                                         {getStatusBadge(animation.status)}
                                     </div>
 
                                     {/* Approved Badge */}
                                     {animation.is_approved && (
-                                        <div className="absolute top-2 right-2 px-2 py-1 text-xs rounded-full bg-success text-white">
+                                        <div className="absolute top-3 right-3 px-2 py-1 text-[10px] font-bold uppercase tracking-wider rounded-md bg-green-500/20 text-green-400 border border-green-500/30 backdrop-blur-md">
                                             Approved
                                         </div>
                                     )}
                                 </div>
 
                                 {/* Info & Controls */}
-                                <div className="p-4">
-                                    <div className="flex items-center justify-between mb-3">
-                                        <span className="text-sm text-muted">{animation.duration}s</span>
+                                <div className="p-4 bg-white/[0.02]">
+                                    <div className="flex items-center justify-between mb-4">
+                                        <div className="flex flex-col">
+                                            <span className="text-xs font-mono text-gray-500">ID: {animation.id.slice(0, 4)}</span>
+                                            <span className="text-sm font-medium text-gray-300">{animation.duration}s</span>
+                                        </div>
+
                                         {animation.video_usage_count > 0 && (
-                                            <span className="text-xs text-primary">
-                                                Used in {animation.video_usage_count} video{animation.video_usage_count !== 1 ? 's' : ''}
+                                            <span className="text-xs px-2 py-1 rounded-md bg-purple-500/10 text-purple-400 border border-purple-500/20">
+                                                {animation.video_usage_count} uses
                                             </span>
                                         )}
                                     </div>
 
                                     {/* Editing Controls */}
                                     {editingId === animation.id && animation.status === 'done' ? (
-                                        <div className="space-y-3">
-                                            <div>
-                                                <label className="text-xs text-muted">Trim Start (s)</label>
-                                                <input
-                                                    type="range"
-                                                    min="0"
-                                                    max={animation.duration - 1}
-                                                    step="0.1"
-                                                    value={editTrimStart}
-                                                    onChange={(e) => setEditTrimStart(parseFloat(e.target.value))}
-                                                    className="w-full"
-                                                />
-                                                <span className="text-xs text-foreground">{editTrimStart.toFixed(1)}s</span>
+                                        <div className="space-y-4 animate-in fade-in slide-in-from-bottom-2">
+                                            <div className="space-y-3 p-3 rounded-xl bg-white/5 border border-white/10">
+                                                <div className="space-y-1">
+                                                    <div className="flex justify-between text-xs text-gray-400">
+                                                        <span>Start</span>
+                                                        <span>{editTrimStart.toFixed(1)}s</span>
+                                                    </div>
+                                                    <input
+                                                        type="range"
+                                                        min="0"
+                                                        max={animation.duration - 1}
+                                                        step="0.1"
+                                                        value={editTrimStart}
+                                                        onChange={(e) => setEditTrimStart(parseFloat(e.target.value))}
+                                                        className="w-full accent-purple-500 h-1 bg-white/10 rounded-lg appearance-none cursor-pointer"
+                                                    />
+                                                </div>
+                                                <div className="space-y-1">
+                                                    <div className="flex justify-between text-xs text-gray-400">
+                                                        <span>End</span>
+                                                        <span>{editTrimEnd.toFixed(1)}s</span>
+                                                    </div>
+                                                    <input
+                                                        type="range"
+                                                        min="0"
+                                                        max={animation.duration - 1}
+                                                        step="0.1"
+                                                        value={editTrimEnd}
+                                                        onChange={(e) => setEditTrimEnd(parseFloat(e.target.value))}
+                                                        className="w-full accent-purple-500 h-1 bg-white/10 rounded-lg appearance-none cursor-pointer"
+                                                    />
+                                                </div>
                                             </div>
-                                            <div>
-                                                <label className="text-xs text-muted">Trim End (s)</label>
-                                                <input
-                                                    type="range"
-                                                    min="0"
-                                                    max={animation.duration - 1}
-                                                    step="0.1"
-                                                    value={editTrimEnd}
-                                                    onChange={(e) => setEditTrimEnd(parseFloat(e.target.value))}
-                                                    className="w-full"
-                                                />
-                                                <span className="text-xs text-foreground">{editTrimEnd.toFixed(1)}s</span>
-                                            </div>
-                                            <div>
-                                                <label className="text-xs text-muted">Speed ({editSpeed.toFixed(2)}x)</label>
-                                                <input
-                                                    type="range"
-                                                    min="0.25"
-                                                    max="4"
-                                                    step="0.25"
-                                                    value={editSpeed}
-                                                    onChange={(e) => setEditSpeed(parseFloat(e.target.value))}
-                                                    className="w-full"
-                                                />
-                                            </div>
+
                                             <div className="flex gap-2">
                                                 <button
                                                     onClick={() => saveEditing(animation.id)}
                                                     disabled={updatingId === animation.id}
-                                                    className="flex-1 py-2 rounded-lg bg-success text-white text-sm font-medium disabled:opacity-50"
+                                                    className="flex-1 py-2 rounded-lg bg-green-600 hover:bg-green-500 text-white text-xs font-bold transition-colors shadow-lg shadow-green-900/20"
                                                 >
-                                                    {updatingId === animation.id ? (
-                                                        <Loader2 className="w-4 h-4 animate-spin mx-auto" />
-                                                    ) : 'Save'}
+                                                    {updatingId === animation.id ? <Loader2 className="w-3 h-3 animate-spin mx-auto" /> : 'SAVE'}
                                                 </button>
                                                 <button
                                                     onClick={cancelEditing}
-                                                    className="flex-1 py-2 rounded-lg bg-card border border-border text-muted text-sm"
+                                                    className="flex-1 py-2 rounded-lg bg-white/5 hover:bg-white/10 text-gray-300 text-xs font-medium transition-colors"
                                                 >
-                                                    Cancel
+                                                    CANCEL
                                                 </button>
                                             </div>
                                         </div>
                                     ) : (
-                                        <div className="flex gap-2">
+                                        <div className="flex items-center gap-2">
                                             {!animation.is_approved && animation.status === 'done' && (
                                                 <button
                                                     onClick={() => handleApprove(animation.id)}
                                                     disabled={updatingId === animation.id}
-                                                    className="flex-1 py-2 rounded-lg bg-success/20 text-success text-sm font-medium hover:bg-success hover:text-white transition-all disabled:opacity-50"
+                                                    className="flex-1 py-2 rounded-lg bg-white/5 hover:bg-green-500/20 text-gray-400 hover:text-green-400 border border-white/5 hover:border-green-500/30 transition-all text-xs font-medium"
                                                 >
-                                                    {updatingId === animation.id ? (
-                                                        <Loader2 className="w-4 h-4 animate-spin mx-auto" />
-                                                    ) : (
-                                                        <span className="flex items-center justify-center gap-1">
-                                                            <Check className="w-4 h-4" /> Approve
-                                                        </span>
-                                                    )}
+                                                    {updatingId === animation.id ? <Loader2 className="w-3 h-3 animate-spin mx-auto" /> : 'Approve'}
                                                 </button>
                                             )}
+
                                             {animation.status === 'done' && (
                                                 <button
                                                     onClick={() => startEditing(animation)}
-                                                    className="py-2 px-3 rounded-lg bg-primary/20 text-primary text-sm hover:bg-primary hover:text-white transition-all"
+                                                    className="p-2 rounded-lg text-gray-400 hover:text-white hover:bg-white/10 transition-colors"
+                                                    title="Edit"
                                                 >
-                                                    Edit
+                                                    <span className="text-xs font-medium">Edit</span>
                                                 </button>
                                             )}
+
                                             <button
                                                 onClick={() => setMoveModalState({ isOpen: true, itemId: animation.id })}
-                                                className="py-2 px-3 rounded-lg bg-muted text-foreground text-sm hover:bg-muted/80 transition-all font-medium"
-                                                title="Move to Folder"
+                                                className="p-2 rounded-lg text-gray-400 hover:text-white hover:bg-white/10 transition-colors"
+                                                title="Move Folder"
                                             >
-                                                Move
+                                                <span className="text-xs font-medium">Move</span>
                                             </button>
+
                                             <button
                                                 onClick={() => handleDelete(animation.id)}
                                                 disabled={updatingId === animation.id}
-                                                className="py-2 px-3 rounded-lg bg-error/20 text-error text-sm hover:bg-error hover:text-white transition-all disabled:opacity-50"
+                                                className="p-2 rounded-lg text-gray-400 hover:text-red-400 hover:bg-red-500/10 transition-colors ml-auto"
+                                                title="Delete"
                                             >
                                                 <Trash2 className="w-4 h-4" />
                                             </button>
@@ -523,30 +534,31 @@ export default function AnimationsPage() {
                 {/* Video Preview Modal */}
                 {selectedAnimation && (
                     <div
-                        className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4"
+                        className="fixed inset-0 bg-black/90 backdrop-blur-xl z-50 flex items-center justify-center p-4 animate-in fade-in duration-200"
                         onClick={() => setSelectedAnimation(null)}
                     >
                         <div
-                            className="relative max-w-4xl w-full"
+                            className="relative max-w-5xl w-full bg-black rounded-2xl overflow-hidden shadow-2xl border border-white/10"
                             onClick={(e) => e.stopPropagation()}
                         >
                             <button
                                 onClick={() => setSelectedAnimation(null)}
-                                className="absolute -top-10 right-0 p-2 text-white hover:text-gray-300"
+                                className="absolute top-4 right-4 p-2 bg-black/50 text-white hover:text-red-400 rounded-full backdrop-blur-md z-10 transition-colors"
                             >
-                                <X className="w-6 h-6" />
+                                <X className="w-5 h-5" />
                             </button>
                             <video
                                 src={selectedAnimation.url!}
                                 controls
                                 autoPlay
                                 loop
-                                className="w-full rounded-xl"
+                                className="w-full h-auto max-h-[80vh]"
                             />
                         </div>
                     </div>
                 )}
             </div>
+
             {/* Video Details Modal */}
             <VideoDetailsModal
                 isOpen={detailsModalOpen}
@@ -557,7 +569,6 @@ export default function AnimationsPage() {
                 video={selectedVideoForDetails}
                 project={currentProject}
                 onUpdate={(updated) => {
-                    // Update local list if needed
                     fetchAnimations();
                 }}
             />
