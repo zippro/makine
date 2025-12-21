@@ -138,13 +138,31 @@ export default function JobDetailPage() {
                 </div>
 
                 {/* Title */}
-                <div className="mb-8">
-                    <h1 className="text-2xl sm:text-3xl font-bold text-foreground">
-                        {job.title_text}
-                    </h1>
-                    <p className="text-muted text-sm mt-2">
-                        Created {new Date(job.created_at).toLocaleString()}
-                    </p>
+                <div className="mb-8 flex items-center justify-between">
+                    <div>
+                        <h1 className="text-2xl sm:text-3xl font-bold text-foreground">
+                            {job.title_text}
+                        </h1>
+                        <p className="text-muted text-sm mt-2">
+                            Created {new Date(job.created_at).toLocaleString()}
+                        </p>
+                    </div>
+                    {job.status === 'error' && (
+                        <button
+                            onClick={async () => {
+                                const supabase = createClient();
+                                await supabase
+                                    .from('video_jobs')
+                                    .update({ status: 'queued', error_message: null, progress: 0 })
+                                    .eq('id', job.id);
+                                window.location.reload();
+                            }}
+                            className="bg-primary text-black px-4 py-2 rounded-lg font-medium hover:bg-primary-hover transition-colors flex items-center gap-2"
+                        >
+                            <RefreshCw className="w-4 h-4" />
+                            Retry Job
+                        </button>
+                    )}
                 </div>
 
                 {/* Status or Video */}

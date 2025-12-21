@@ -575,9 +575,21 @@ async function processJob(job) {
 
             let lastProgressUpdate = 0;
 
+            let stderrBuffer = [];
+            const MAX_STDERR_LINES = 20;
+
             ffmpeg.stderr.on('data', (data) => {
                 const output = data.toString();
-                console.log('FF Log:', output); // DEBUG VISIBILITY
+                // console.log('FF Log:', output); // Verify verbosity doesn't flood logs
+
+                // Store last N lines for debugging
+                const lines = output.split('\n');
+                lines.forEach(line => {
+                    if (line.trim()) {
+                        stderrBuffer.push(line.trim());
+                        if (stderrBuffer.length > MAX_STDERR_LINES) stderrBuffer.shift();
+                    }
+                });
 
                 // Parse time=HH:MM:SS.mm
                 const timeMatch = output.match(/time=(\d{2}):(\d{2}):(\d{2}\.\d{2})/);
@@ -605,7 +617,10 @@ async function processJob(job) {
 
             ffmpeg.on('close', (code) => {
                 if (code === 0) resolve();
-                else reject(new Error(`FFmpeg exited with code ${code}`));
+                else {
+                    const stderrLog = stderrBuffer.join('\n');
+                    reject(new Error(`FFmpeg exited with code ${code}. Log:\n${stderrLog}`));
+                }
             });
 
             ffmpeg.on('error', (err) => reject(err));
