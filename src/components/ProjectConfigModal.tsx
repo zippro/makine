@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { X, Save, AlertCircle, Youtube, Loader2, Play, Layers, List, Image as ImageIcon, Trash2, GripVertical, Type, Plus, ChevronUp, ChevronDown, Upload } from "lucide-react";
+import { X, Save, AlertCircle, Youtube, Loader2, Play, Layers, List, Image as ImageIcon, Trash2, GripVertical, Type, Plus, ChevronUp, ChevronDown, Upload, Music } from "lucide-react";
 import { Project } from "@/lib/types";
 import { createClient } from "@/lib/supabase/client";
 
@@ -19,6 +19,7 @@ interface TemplateAsset {
     type: 'animation' | 'image';
     url: string;
     duration: number;
+    loop_count?: number;
 }
 
 interface OverlayImage {
@@ -27,6 +28,7 @@ interface OverlayImage {
     start_time: number;
     duration: number;
     position: string;
+    fade_duration?: number;
 }
 
 interface TitleConfig {
@@ -36,6 +38,14 @@ interface TitleConfig {
     position: string;
     font: string;
     fontSize?: number;
+    fade_duration?: number;
+}
+
+interface VisualizerConfig {
+    enabled: boolean;
+    style: 'bar' | 'line';
+    color: string;
+    position: 'bottom' | 'top';
 }
 
 interface OverlayConfig {
@@ -54,10 +64,18 @@ export function ProjectConfigModal({ project, isOpen, onClose, onUpdate }: Proje
     // Config State
     const [videoMode, setVideoMode] = useState<string>("simple_animation");
     const [templateAssets, setTemplateAssets] = useState<TemplateAsset[]>([]);
+    const [defaultLoopCount, setDefaultLoopCount] = useState<number>(1);
     const [overlayConfig, setOverlayConfig] = useState<OverlayConfig>({
         images: [],
-        title: { enabled: true, start_time: 0, duration: 5, position: "center", font: "Arial" }
+        title: { enabled: true, start_time: 0, duration: 5, position: "center", font: "Arial", fade_duration: 1 }
     });
+    const [visualizerConfig, setVisualizerConfig] = useState<VisualizerConfig>({
+        enabled: false,
+        style: 'bar',
+        color: '#ffffff',
+        position: 'bottom'
+    });
+    const [projectFonts, setProjectFonts] = useState<any[]>([]);
 
     // UI State
     const [isLoading, setIsLoading] = useState(false);
@@ -76,11 +94,20 @@ export function ProjectConfigModal({ project, isOpen, onClose, onUpdate }: Proje
             // Settings (Fallbacks handled)
             setVideoMode((project as any).video_mode || "simple_animation");
             setTemplateAssets((project as any).template_assets || []);
+            setDefaultLoopCount((project as any).default_loop_count || 1);
+
             const defaultOverlay: OverlayConfig = {
                 images: [],
                 title: { enabled: true, start_time: 0, duration: 5, position: "center", font: "Arial" }
             };
             setOverlayConfig((project as any).overlay_config || defaultOverlay);
+            setVisualizerConfig((project as any).visualizer_config || { enabled: false, style: 'bar', color: '#ffffff', position: 'bottom' });
+
+            // Fetch Fonts
+            fetch(`/api/fonts?projectId=${project.id}`)
+                .then(res => res.json())
+                .then(data => { if (Array.isArray(data)) setProjectFonts(data); })
+                .catch(console.error);
         }
     }, [isOpen, project]);
 
@@ -98,6 +125,8 @@ export function ProjectConfigModal({ project, isOpen, onClose, onUpdate }: Proje
                 video_mode: videoMode,
                 template_assets: templateAssets,
                 overlay_config: overlayConfig,
+                visualizer_config: visualizerConfig,
+                default_loop_count: defaultLoopCount
             };
 
             // Only update credentials if inputs are touched/valid
@@ -133,6 +162,19 @@ export function ProjectConfigModal({ project, isOpen, onClose, onUpdate }: Proje
     };
 
     // Asset Helpers
+    // Local state for inputs to prevent cursor jumping/validation locking
+    const [localLoopCount, setLocalLoopCount] = useState<string>((project.default_loop_count || 1).toString());
+    const [localTitleFontSize, setLocalTitleFontSize] = useState<string>((overlayConfig.title?.fontSize || 60).toString());
+
+    // Sync local state when props change (external updates)
+    useEffect(() => {
+        setLocalLoopCount((defaultLoopCount || 1).toString());
+    }, [defaultLoopCount]);
+
+    useEffect(() => {
+        setLocalTitleFontSize((overlayConfig.title?.fontSize || 60).toString());
+    }, [overlayConfig.title?.fontSize]);
+
     const addAsset = () => {
         const newAsset: TemplateAsset = {
             id: crypto.randomUUID(),
@@ -235,6 +277,7 @@ export function ProjectConfigModal({ project, isOpen, onClose, onUpdate }: Proje
                             <div className="space-y-6 max-w-xl">
                                 <h3 className="text-lg font-semibold border-b border-border pb-2">YouTube Credentials</h3>
                                 <div className="space-y-4">
+                                    {/* Existing Credentials */}
                                     <div>
                                         <label className="text-sm font-medium block mb-1.5">Client ID</label>
                                         <input
@@ -266,6 +309,31 @@ export function ProjectConfigModal({ project, isOpen, onClose, onUpdate }: Proje
                                         />
                                     </div>
                                 </div>
+
+                                <h3 className="text-lg font-semibold border-b border-border pb-2 pt-4">Channel & Content (AI)</h3>
+                                <div className="space-y-4">
+                                    <div>
+                                        <label className="text-sm font-medium block mb-1.5">Channel Info / Style</label>
+                                        <textarea
+                                            value={(project as any).channel_info || ""}
+                                            onChange={(e) => onUpdate({ ...project, channel_info: e.target.value })}
+                                            className="w-full bg-card border border-border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/20 outline-none min-h-[100px]"
+                                            placeholder="Describe your channel style, target audience, and tone (e.g. 'Chill beats for studying, relaxing visuals, lo-fi aesthetic'). This helps AI generate better descriptions."
+                                        />
+                                        <p className="text-xs text-muted mt-1">Used by AI to match your channel's voice.</p>
+                                    </div>
+                                    <div>
+                                        <label className="text-sm font-medium block mb-1.5">Default Keywords / Tags</label>
+                                        <input
+                                            type="text"
+                                            value={(project as any).keywords || ""}
+                                            onChange={(e) => onUpdate({ ...project, keywords: e.target.value })}
+                                            className="w-full bg-card border border-border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/20 outline-none"
+                                            placeholder="e.g. lofi, study, relax, beats (comma separated)"
+                                        />
+                                        <p className="text-xs text-muted mt-1">Core keywords to include in every video.</p>
+                                    </div>
+                                </div>
                             </div>
                         )}
 
@@ -295,6 +363,34 @@ export function ProjectConfigModal({ project, isOpen, onClose, onUpdate }: Proje
                                         </button>
                                     ))}
                                 </div>
+
+                                {/* Global Loop Count Setting */}
+                                {videoMode !== 'simple_animation' && (
+                                    <div className="pt-4 border-t border-border mt-4">
+                                        <label className="text-sm font-medium mb-1 block">Animation Loop Count (Standard)</label>
+                                        <p className="text-xs text-muted mb-2">Each animation in the playlist will loop this many times.</p>
+                                        <div className="flex items-center gap-3">
+                                            <input
+                                                type="number"
+                                                value={localLoopCount}
+                                                onChange={(e) => {
+                                                    const val = e.target.value;
+                                                    setLocalLoopCount(val); // Always update local state
+
+                                                    // Only update parent if valid
+                                                    const num = parseInt(val);
+                                                    if (!isNaN(num) && num >= 1) {
+                                                        setDefaultLoopCount(num);
+                                                    }
+                                                }}
+                                                className="w-24 bg-background border border-border rounded px-3 py-2 text-sm focus:ring-2 focus:ring-primary/20 outline-none"
+                                                min="1"
+                                                placeholder="1"
+                                            />
+                                            <span className="text-sm text-muted">times per asset</span>
+                                        </div>
+                                    </div>
+                                )}
                             </div>
                         )}
 
@@ -347,16 +443,22 @@ export function ProjectConfigModal({ project, isOpen, onClose, onUpdate }: Proje
                                                     className="w-full text-sm bg-background border border-border rounded px-2 py-1.5"
                                                 />
                                                 <div className="flex items-center gap-3">
-                                                    <label className="text-xs text-muted flex items-center gap-1.5">
-                                                        Duration (s):
-                                                        <input
-                                                            type="number"
-                                                            value={asset.duration}
-                                                            onChange={(e) => updateAsset(index, 'duration', parseInt(e.target.value) || 10)}
-                                                            className="w-16 text-xs bg-background border border-border rounded px-2 py-1"
-                                                            min="1"
-                                                        />
-                                                    </label>
+                                                    {asset.type === 'animation' ? (
+                                                        <span className="text-xs text-muted">
+                                                            Loop: {defaultLoopCount}x (Global)
+                                                        </span>
+                                                    ) : (
+                                                        <label className="text-xs text-muted flex items-center gap-1.5">
+                                                            Duration (s):
+                                                            <input
+                                                                type="number"
+                                                                value={asset.duration}
+                                                                onChange={(e) => updateAsset(index, 'duration', parseInt(e.target.value) || 10)}
+                                                                className="w-16 text-xs bg-background border border-border rounded px-2 py-1"
+                                                                min="1"
+                                                            />
+                                                        </label>
+                                                    )}
                                                 </div>
                                             </div>
 
@@ -426,37 +528,172 @@ export function ProjectConfigModal({ project, isOpen, onClose, onUpdate }: Proje
                                                     />
                                                 </div>
                                                 <div>
+                                                    <label className="text-xs text-muted block mb-1">Fade Duration (s)</label>
+                                                    <input
+                                                        type="number"
+                                                        value={overlayConfig.title?.fade_duration ?? 0}
+                                                        onChange={(e) => setOverlayConfig({
+                                                            ...overlayConfig,
+                                                            title: { ...overlayConfig.title, fade_duration: parseFloat(e.target.value) || 0 }
+                                                        })}
+                                                        className="w-full bg-background border border-border rounded px-3 py-2 text-sm"
+                                                        min="0"
+                                                        max="5"
+                                                        placeholder="0 (No Fade)"
+                                                    />
+                                                </div>
+                                                <div>
                                                     <label className="text-xs text-muted block mb-1">Font</label>
-                                                    <div className="flex gap-2">
+                                                    <div className="flex gap-2 items-center">
                                                         <select
                                                             value={overlayConfig.title?.font || 'Arial'}
                                                             onChange={(e) => setOverlayConfig({
                                                                 ...overlayConfig,
                                                                 title: { ...overlayConfig.title, font: e.target.value }
                                                             })}
-                                                            className="flex-1 bg-background border border-border rounded px-3 py-2 text-sm"
+                                                            className="flex-1 bg-background border border-border rounded px-3 py-2 text-sm max-w-[120px]"
                                                         >
-                                                            <option value="Arial">Arial</option>
-                                                            <option value="Helvetica">Helvetica</option>
-                                                            <option value="Times New Roman">Times New Roman</option>
-                                                            <option value="Georgia">Georgia</option>
-                                                            <option value="Verdana">Verdana</option>
-                                                            <option value="Impact">Impact</option>
+                                                            <optgroup label="Standard">
+                                                                <option value="Arial">Arial</option>
+                                                                <option value="Helvetica">Helvetica</option>
+                                                                <option value="Times New Roman">Times New Roman</option>
+                                                                <option value="Georgia">Georgia</option>
+                                                                <option value="Verdana">Verdana</option>
+                                                                <option value="Impact">Impact</option>
+                                                            </optgroup>
+                                                            {projectFonts.length > 0 && (
+                                                                <optgroup label="Custom">
+                                                                    {projectFonts.map(f => (
+                                                                        <option key={f.id} value={f.name}>{f.name}</option>
+                                                                    ))}
+                                                                </optgroup>
+                                                            )}
                                                         </select>
+
+                                                        {overlayConfig.title?.font && !['Arial', 'Helvetica', 'Times New Roman', 'Georgia', 'Verdana', 'Impact'].includes(overlayConfig.title.font) && (
+                                                            <button
+                                                                title="Delete Custom Font"
+                                                                onClick={async () => {
+                                                                    if (!confirm('Delete this font?')) return;
+                                                                    const font = projectFonts.find(f => f.name === overlayConfig.title.font);
+                                                                    if (font) {
+                                                                        await fetch(`/api/fonts?id=${font.id}`, { method: 'DELETE' });
+                                                                        setProjectFonts(prev => prev.filter(p => p.id !== font.id));
+                                                                        setOverlayConfig({
+                                                                            ...overlayConfig,
+                                                                            title: { ...overlayConfig.title, font: 'Arial' }
+                                                                        });
+                                                                    }
+                                                                }}
+                                                                className="p-2 text-muted hover:text-red-500"
+                                                            >
+                                                                <Trash2 className="w-4 h-4" />
+                                                            </button>
+                                                        )}
+
+                                                        <label className="p-2 bg-primary/10 text-primary hover:bg-primary/20 rounded cursor-pointer transition-colors" title="Upload Font (.ttf, .otf)">
+                                                            <Upload className="w-4 h-4" />
+                                                            <input
+                                                                type="file"
+                                                                className="hidden"
+                                                                accept=".ttf,.otf"
+                                                                onChange={async (e) => {
+                                                                    const file = e.target.files?.[0];
+                                                                    if (!file) return;
+
+                                                                    if (!file.name.endsWith('.ttf') && !file.name.endsWith('.otf')) {
+                                                                        alert('Only .ttf and .otf files are supported');
+                                                                        return;
+                                                                    }
+
+                                                                    try {
+                                                                        // 1. Upload
+                                                                        const supabase = createClient();
+                                                                        const fileExt = file.name.split('.').pop();
+                                                                        const fileName = `fonts/${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
+
+                                                                        // Try 'assets' bucket first, fallback to 'uploads'
+                                                                        let bucket = 'assets';
+                                                                        let { error: upErr } = await supabase.storage.from(bucket).upload(fileName, file);
+
+                                                                        if (upErr && (upErr.message.includes('not found') || (upErr as any).statusCode === 404)) {
+                                                                            bucket = 'uploads'; // Fallback
+                                                                            const { error: upErr2 } = await supabase.storage.from(bucket).upload(fileName, file);
+                                                                            if (upErr2) throw upErr2;
+                                                                        } else if (upErr) {
+                                                                            throw upErr;
+                                                                        }
+
+                                                                        const { data: { publicUrl } } = supabase.storage.from(bucket).getPublicUrl(fileName);
+
+                                                                        // 2. Register
+                                                                        const fontName = file.name.replace(/\.[^/.]+$/, ""); // remove extension
+                                                                        const res = await fetch('/api/fonts', {
+                                                                            method: 'POST',
+                                                                            headers: { 'Content-Type': 'application/json' },
+                                                                            body: JSON.stringify({
+                                                                                name: fontName,
+                                                                                url: publicUrl,
+                                                                                project_id: project.id
+                                                                            })
+                                                                        });
+
+                                                                        if (!res.ok) throw new Error('Failed to save font record');
+                                                                        const newFont = await res.json();
+
+                                                                        setProjectFonts(prev => [newFont, ...prev]);
+                                                                        setOverlayConfig({
+                                                                            ...overlayConfig,
+                                                                            title: { ...overlayConfig.title, font: fontName }
+                                                                        });
+
+                                                                    } catch (err: any) {
+                                                                        console.error('Font upload failed', err);
+                                                                        alert(`Failed to upload font: ${err.message}`);
+                                                                    }
+                                                                }}
+                                                            />
+                                                        </label>
+
                                                         <input
                                                             type="number"
-                                                            value={overlayConfig.title?.fontSize ?? 60}
-                                                            onChange={(e) => setOverlayConfig({
-                                                                ...overlayConfig,
-                                                                title: { ...overlayConfig.title, fontSize: parseInt(e.target.value) || 60 }
-                                                            })}
-                                                            className="w-20 bg-background border border-border rounded px-3 py-2 text-sm"
+                                                            value={localTitleFontSize}
+                                                            onChange={(e) => {
+                                                                const val = e.target.value;
+                                                                setLocalTitleFontSize(val);
+
+                                                                const num = parseInt(val);
+                                                                if (!isNaN(num) && num >= 10) {
+                                                                    setOverlayConfig({
+                                                                        ...overlayConfig,
+                                                                        title: { ...overlayConfig.title, fontSize: num }
+                                                                    });
+                                                                }
+                                                            }}
+                                                            className="w-16 bg-background border border-border rounded px-2 py-2 text-sm text-center"
                                                             min="10"
                                                             max="200"
-                                                            placeholder="Size"
+                                                            placeholder="60"
                                                             title="Font Size"
                                                         />
                                                     </div>
+                                                </div>
+                                                <div>
+                                                    <label className="text-xs text-muted block mb-1">Style</label>
+                                                    <select
+                                                        value={(overlayConfig.title as any).style || 'standard'}
+                                                        onChange={(e) => setOverlayConfig({
+                                                            ...overlayConfig,
+                                                            title: { ...overlayConfig.title, style: e.target.value } as any
+                                                        })}
+                                                        className="w-full bg-background border border-border rounded px-3 py-2 text-sm"
+                                                    >
+                                                        <option value="standard">Standard (Shadow)</option>
+                                                        <option value="boxed">Boxed (Background)</option>
+                                                        <option value="neon">Neon Glow</option>
+                                                        <option value="outline">Strong Outline</option>
+                                                        <option value="clean">Clean (No Border)</option>
+                                                    </select>
                                                 </div>
                                                 <div>
                                                     <label className="text-xs text-muted block mb-1">Position</label>
@@ -571,6 +808,17 @@ export function ProjectConfigModal({ project, isOpen, onClose, onUpdate }: Proje
                                                         />
                                                     </div>
                                                     <div>
+                                                        <label className="text-xs text-muted block mb-1">Fade (s)</label>
+                                                        <input
+                                                            type="number"
+                                                            value={img.fade_duration || 0}
+                                                            onChange={(e) => updateOverlayImage(index, 'fade_duration', parseFloat(e.target.value) || 0)}
+                                                            className="w-full text-sm bg-background border border-border rounded px-2 py-1"
+                                                            min="0"
+                                                            max="5"
+                                                        />
+                                                    </div>
+                                                    <div>
                                                         <label className="text-xs text-muted block mb-1">Position</label>
                                                         <select
                                                             value={img.position}
@@ -590,6 +838,63 @@ export function ProjectConfigModal({ project, isOpen, onClose, onUpdate }: Proje
                                         {overlayConfig.images.length === 0 && (
                                             <div className="text-center py-8 text-muted text-sm border-2 border-dashed border-border rounded-xl">
                                                 No image overlays. Add one to overlay on the video.
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+
+                                {/* Visualizer Config */}
+                                <div className="space-y-4">
+                                    <h3 className="text-lg font-semibold flex items-center gap-2 border-b border-border pb-2">
+                                        <Music className="w-5 h-5" /> Audio Visualizer
+                                    </h3>
+                                    <div className="p-4 bg-card border border-border rounded-xl space-y-4">
+                                        <label className="flex items-center gap-2 cursor-pointer">
+                                            <input
+                                                type="checkbox"
+                                                checked={visualizerConfig.enabled}
+                                                onChange={(e) => setVisualizerConfig({ ...visualizerConfig, enabled: e.target.checked })}
+                                                className="w-4 h-4 rounded border-border text-primary focus:ring-primary"
+                                            />
+                                            <span className="font-medium">Enable Synchronized Equalizer</span>
+                                        </label>
+
+                                        {visualizerConfig.enabled && (
+                                            <div className="grid grid-cols-2 gap-4 pt-2">
+                                                <div>
+                                                    <label className="text-xs text-muted block mb-1">Style</label>
+                                                    <select
+                                                        value={visualizerConfig.style}
+                                                        onChange={(e) => setVisualizerConfig({ ...visualizerConfig, style: e.target.value as any })}
+                                                        className="w-full bg-background border border-border rounded px-3 py-2 text-sm"
+                                                    >
+                                                        <option value="bar">Bar (Classic)</option>
+                                                        <option value="line">Line (Simple)</option>
+                                                        <option value="wave">Waveform (Smooth)</option>
+                                                        <option value="spectrum">Spectrum (Frequency)</option>
+                                                        <option value="round">Circular (Stereo)</option>
+                                                    </select>
+                                                </div>
+                                                <div>
+                                                    <label className="text-xs text-muted block mb-1">Color</label>
+                                                    <input
+                                                        type="color"
+                                                        value={visualizerConfig.color}
+                                                        onChange={(e) => setVisualizerConfig({ ...visualizerConfig, color: e.target.value })}
+                                                        className="w-full h-9 bg-background border border-border rounded cursor-pointer"
+                                                    />
+                                                </div>
+                                                <div>
+                                                    <label className="text-xs text-muted block mb-1">Position</label>
+                                                    <select
+                                                        value={visualizerConfig.position}
+                                                        onChange={(e) => setVisualizerConfig({ ...visualizerConfig, position: e.target.value as any })}
+                                                        className="w-full bg-background border border-border rounded px-3 py-2 text-sm"
+                                                    >
+                                                        <option value="bottom">Bottom</option>
+                                                        <option value="top">Top</option>
+                                                    </select>
+                                                </div>
                                             </div>
                                         )}
                                     </div>
@@ -633,6 +938,6 @@ export function ProjectConfigModal({ project, isOpen, onClose, onUpdate }: Proje
                     </button>
                 </div>
             </div>
-        </div>
+        </div >
     );
 }

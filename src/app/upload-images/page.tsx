@@ -14,6 +14,8 @@ export default function UploadImagesPage() {
     const [progress, setProgress] = useState<UploadStatus[]>([]);
     const [error, setError] = useState<string | null>(null);
     const [existingImages, setExistingImages] = useState<any[]>([]);
+    const [currentFolder, setCurrentFolder] = useState<string>('/');
+    const [projectFolders, setProjectFolders] = useState<any[]>([]);
 
     useEffect(() => {
         if (currentProject) {
@@ -26,8 +28,59 @@ export default function UploadImagesPage() {
                     console.error("Failed to load existing images:", err);
                     setError(err.message);
                 });
+
+            fetch(`/api/folders?projectId=${currentProject.id}`)
+                .then(async res => {
+                    if (res.ok) {
+                        const data = await res.json();
+                        if (Array.isArray(data)) setProjectFolders(data);
+                    } else {
+                        const errData = await res.json().catch(() => ({}));
+                        const errMsg = errData.error || 'Failed to fetch folders';
+                        if (errMsg.includes('Configuration Error')) setError(errMsg);
+                    }
+                })
+                .catch(err => {
+                    console.error("Failed to load folders:", err);
+                    setError(`Folder Error: ${err.message}`);
+                });
         }
     }, [currentProject]);
+
+    // Folder helpers (simplified for flat list view of folders)
+    // Actually, for "Upload Images" it might be better to just select a folder from a dropdown?
+    // Or full navigation?
+    // User asked: "show folders at first screen".
+    // I will implement a simpler folder navigation here since it's an upload page?
+    // But existing images grid should probably be organized.
+
+    // Let's implement full nav similar to others for consistency.
+    const getFolderContents = (files: any[], folder: string) => {
+        return files.filter(f => (f.folder || '/') === folder);
+    };
+
+    const getSubfolders = (files: any[], currentPath: string) => {
+        const folders = new Set<string>();
+        // 1. Persistent
+        projectFolders.forEach(pf => {
+            const fPath = pf.path;
+            if (fPath !== currentPath && fPath.startsWith(currentPath)) {
+                const rel = fPath.slice(currentPath.length + (currentPath === '/' ? 0 : 1));
+                const firstPart = rel.split('/')[0];
+                if (firstPart) folders.add(currentPath === '/' ? `/${firstPart}` : `${currentPath}/${firstPart}`);
+            }
+        });
+        // 2. Files
+        files.forEach(f => {
+            const fPath = f.folder || '/';
+            if (fPath !== currentPath && fPath.startsWith(currentPath)) {
+                const rel = fPath.slice(currentPath.length + (currentPath === '/' ? 0 : 1));
+                const firstPart = rel.split('/')[0];
+                if (firstPart) folders.add(currentPath === '/' ? `/${firstPart}` : `${currentPath}/${firstPart}`);
+            }
+        });
+        return Array.from(folders).sort();
+    };
 
     const handleFilesSelected = (files: File[]) => {
         if (!currentProject) {
@@ -102,7 +155,8 @@ export default function UploadImagesPage() {
                         file_size: item.file.size,
                         width: dimensions.width,
                         height: dimensions.height,
-                        project_id: currentProject.id
+                        project_id: currentProject.id,
+                        folder: currentFolder // Include current folder
                     }),
                 });
 
@@ -112,6 +166,11 @@ export default function UploadImagesPage() {
                 }
                 const imageRecord = await response.json();
 
+                // Refresh existing images
+                const imgsRes = await fetch(`/api/images?projectId=${currentProject.id}`);
+                setExistingImages(await imgsRes.json());
+
+                // ... rest of animation creation ...
                 // Update status to uploaded
                 setProgress(prev => prev.map(p =>
                     p.id === item.id ? { ...p, status: 'uploaded' as const, url: publicUrl } : p
@@ -128,7 +187,8 @@ export default function UploadImagesPage() {
                         image_id: imageRecord.id,
                         duration: duration,
                         status: 'queued',
-                        project_id: currentProject.id // Ensure animation is also scoped if the table has project_id
+                        project_id: currentProject.id,
+                        folder: currentFolder // Inherit folder
                     })
                     .select()
                     .single();
@@ -166,22 +226,44 @@ export default function UploadImagesPage() {
         setUploading(false);
     };
 
+    // ... render logic ...
+    const visibleFolders = getSubfolders(existingImages, currentFolder);
+    const visibleImages = getFolderContents(existingImages, currentFolder);
+
     const doneCount = progress.filter(item => item.status === 'done').length;
 
     return (
         <div className="min-h-screen bg-background">
             <div className="mx-auto max-w-4xl px-4 sm:px-6 lg:px-8 py-12">
+                {/* ... header ... */}
                 <div className="text-center mb-12">
+                    {/* ... title ... */}
                     <h1 className="text-4xl font-bold gradient-text mb-4">
                         Upload Source Images
                     </h1>
-                    <p className="text-muted text-lg max-w-2xl mx-auto">
-                        {currentProject ? `Project: ${currentProject.name}` : 'Select a project to upload images'}
-                    </p>
+                    {currentProject && (
+                        <div className="flex items-center justify-center gap-2 mt-4 text-muted">
+                            <span>Folder:</span>
+                            <div className="flex items-center gap-1 bg-muted/20 px-3 py-1 rounded-full">
+                                <span className="text-sm">/</span>
+                                {currentFolder !== '/' && (
+                                    <button onClick={() => setCurrentFolder(currentFolder.split('/').slice(0, -1).join('/') || '/')} className="text-sm hover:underline">
+                                        ...
+                                    </button>
+                                )}
+                                <span className="text-sm font-mono">{currentFolder}</span>
+                            </div>
+                            {currentFolder !== '/' && (
+                                <button onClick={() => setCurrentFolder(currentFolder.split('/').slice(0, -1).join('/') || '/')} className="text-sm border px-2 py-0.5 rounded hover:bg-muted">Up</button>
+                            )}
+                        </div>
+                    )}
                 </div>
 
+                {/* Upload Form */}
                 {!uploading ? (
                     <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                        {/* ... */}
                         <div className="flex justify-center">
                             <AnimationDurationSelect
                                 value={duration}
@@ -204,6 +286,7 @@ export default function UploadImagesPage() {
                     </div>
                 ) : null}
 
+                {/* ... progress ... */}
                 <div className="mt-8">
                     <UploadProgress
                         items={progress}
@@ -213,7 +296,7 @@ export default function UploadImagesPage() {
                     />
                 </div>
 
-                {doneCount > 0 && (
+                {doneCount > 0 && ( /* ... */
                     <div className="mt-8 p-4 rounded-xl bg-success/10 border border-success/20 text-center">
                         <p className="text-success font-medium">
                             {doneCount} animation{doneCount !== 1 ? 's' : ''} queued for generation.{' '}
@@ -225,20 +308,81 @@ export default function UploadImagesPage() {
                 )}
             </div>
 
-            {/* Existing Images Gallery */}
-            {existingImages.length > 0 && (
+            {/* Existing Images Gallery with Folders */}
+            {(existingImages.length > 0 || projectFolders.length > 0) && (
                 <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 pb-12">
-                    <h2 className="text-2xl font-bold mb-6">Existing Images in Project</h2>
+                    <div className="flex justify-between items-center mb-6">
+                        <h2 className="text-2xl font-bold">Existing Images in Project</h2>
+                        <button onClick={async () => {
+                            const name = prompt('New Folder:');
+                            if (name) {
+                                const newPath = currentFolder === '/' ? `/${name}` : `${currentFolder}/${name}`;
+                                await fetch('/api/folders', { method: 'POST', body: JSON.stringify({ project_id: currentProject?.id, path: newPath }) });
+                                // Refresh folders
+                                const res = await fetch(`/api/folders?projectId=${currentProject?.id}`);
+                                setProjectFolders(await res.json());
+                                setCurrentFolder(newPath);
+                            }
+                        }} className="text-sm bg-primary/10 text-primary px-3 py-1 rounded hover:bg-primary/20">+ New Folder</button>
+                    </div>
+
                     <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-6">
-                        {existingImages.map((img, idx) => (
+                        {/* Folders */}
+                        {visibleFolders.map(folderPath => {
+                            const folderName = folderPath.split('/').pop();
+                            return (
+                                <div
+                                    key={folderPath}
+                                    onDoubleClick={() => setCurrentFolder(folderPath)}
+                                    className="aspect-square rounded-xl border-2 border-dashed border-border flex flex-col items-center justify-center gap-2 hover:border-primary/50 cursor-pointer"
+                                >
+                                    <span className="text-4xl">📂</span>
+                                    <span className="text-sm font-medium">{folderName}</span>
+                                </div>
+                            )
+                        })}
+
+                        {/* Images */}
+                        {visibleImages.map((img, idx) => (
                             <div key={img.id || idx} className="relative group aspect-square bg-card rounded-xl overflow-hidden border border-border">
                                 <img
                                     src={img.url || '/placeholder.svg'}
                                     alt={img.filename || 'Image'}
                                     className="w-full h-full object-cover transition-transform group-hover:scale-105"
                                 />
-                                <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-end p-4">
-                                    <p className="text-white text-xs truncate w-full">{img.filename || 'Untitled'}</p>
+                                <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-end p-4 gap-2">
+                                    <div className="flex justify-between items-end">
+                                        <p className="text-white text-xs truncate flex-1 mr-2">{img.filename || 'Untitled'}</p>
+                                        <button
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                const newFolder = prompt('Move to folder (e.g. /Pop/Hits):', img.folder || '/');
+                                                if (newFolder !== null && newFolder !== img.folder) {
+                                                    // Move logic
+                                                    fetch('/api/images', {
+                                                        method: 'PATCH',
+                                                        headers: { 'Content-Type': 'application/json' },
+                                                        body: JSON.stringify({
+                                                            id: img.id,
+                                                            project_id: currentProject?.id,
+                                                            folder: newFolder.startsWith('/') ? newFolder : `/${newFolder}`
+                                                        })
+                                                    }).then(async res => {
+                                                        if (res.ok) {
+                                                            // Refresh
+                                                            const r = await fetch(`/api/images?projectId=${currentProject?.id}`);
+                                                            setExistingImages(await r.json());
+                                                        } else {
+                                                            alert('Failed to move image');
+                                                        }
+                                                    });
+                                                }
+                                            }}
+                                            className="text-xs bg-white/20 hover:bg-white/40 text-white px-2 py-1 rounded backdrop-blur-sm transition-colors"
+                                        >
+                                            Move
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
                         ))}

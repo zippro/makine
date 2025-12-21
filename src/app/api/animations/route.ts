@@ -65,6 +65,8 @@ export async function PATCH(request: NextRequest) {
         if (trim_end !== undefined) updateData.trim_end = trim_end;
         if (speed_multiplier !== undefined) updateData.speed_multiplier = speed_multiplier;
         if (url !== undefined) updateData.url = url;
+        const { folder } = body;
+        if (folder !== undefined) updateData.folder = folder;
 
         const { data, error } = await supabase
             .from('animations')

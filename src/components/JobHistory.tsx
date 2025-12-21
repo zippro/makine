@@ -77,7 +77,7 @@ export function JobHistory({ limit }: JobHistoryProps) {
     useEffect(() => {
         const interval = setInterval(() => {
             handleRefresh();
-        }, 5000);
+        }, 2000);
 
         return () => clearInterval(interval);
     }, [limit, currentProject]);
@@ -253,15 +253,38 @@ export function JobHistory({ limit }: JobHistoryProps) {
                                     {job.title_text}
                                 </h3>
                                 <div className="flex items-center gap-3 mt-1">
-                                    <JobStatusBadge status={job.status} />
-                                    <span className="text-xs text-muted">
-                                        {formatDate(job.created_at)}
-                                    </span>
-                                    {job.duration_seconds && (
-                                        <span className="text-xs text-muted">
-                                            {formatDuration(job.duration_seconds)}
-                                        </span>
-                                    )}
+                                    <div className="flex flex-col gap-1.5 flex-1">
+                                        <div className="flex items-center gap-3">
+                                            <JobStatusBadge status={job.status} />
+                                            <span className="text-xs text-muted">
+                                                {formatDate(job.created_at)}
+                                            </span>
+                                            {job.duration_seconds && (
+                                                <span className="text-xs text-muted">
+                                                    {formatDuration(job.duration_seconds)}
+                                                </span>
+                                            )}
+                                        </div>
+
+                                        {/* Progress Bar for History */}
+                                        {job.status === 'processing' && (
+                                            <div className="w-full max-w-[200px] space-y-1">
+                                                <div className="flex items-center justify-between text-xs">
+                                                    <span className="text-primary font-medium">Processing</span>
+                                                    <span className="text-muted tabular-nums">
+                                                        {job.progress ? `${job.progress}%` : '0%'}
+                                                    </span>
+                                                </div>
+                                                <div className="h-1.5 w-full bg-secondary rounded-full overflow-hidden relative">
+                                                    <div className="absolute inset-0 bg-primary/20 animate-pulse" />
+                                                    <div
+                                                        className="absolute inset-y-0 left-0 bg-primary transition-all duration-500 ease-out"
+                                                        style={{ width: `${job.progress || 0}%` }}
+                                                    />
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
                                 </div>
                             </div>
                         </div>

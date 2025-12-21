@@ -118,18 +118,22 @@ export function JobStatus({ jobId, initialStatus = 'queued', onComplete }: JobSt
                 .single();
 
             if (!error && data) {
-                if (data.status !== status) {
-                    setStatus(data.status);
-                    setJob(data);
-                    if (data.status === 'processing') {
-                        setStartTime(new Date(data.updated_at || data.created_at).getTime());
+                // Use functional update to access latest state without adding to dependencies
+                setJob(prevJob => {
+                    if (!prevJob) return data;
+                    // Check if anything relevant changed
+                    if (prevJob.status !== data.status || prevJob.progress !== data.progress) {
+                        setStatus(data.status);
+                        // Also update start time if just started
+                        if (data.status === 'processing' && prevJob.status !== 'processing') {
+                            setStartTime(new Date(data.updated_at || data.created_at).getTime());
+                        }
+                        return data;
                     }
-                    if (data.status === 'done' && onComplete) {
-                        onComplete(data);
-                    }
-                }
+                    return prevJob;
+                });
             }
-        }, 5000);
+        }, 1000); // Poll every 1 second for smoother progress
 
         return () => clearInterval(pollInterval);
     }, [jobId, status, onComplete]);
@@ -172,7 +176,7 @@ export function JobStatus({ jobId, initialStatus = 'queued', onComplete }: JobSt
                             {/* Show percentage if available */}
                             {typeof (job as any)?.progress === 'number' && (job as any).progress > 0 && (
                                 <span className="text-sm font-medium text-primary">
-                                    {(job as any).progress}%
+                                    {job?.progress}%
                                 </span>
                             )}
                             <span className="text-sm font-medium tabular-nums text-muted">
@@ -185,10 +189,10 @@ export function JobStatus({ jobId, initialStatus = 'queued', onComplete }: JobSt
                             <div className="absolute inset-0 h-full w-full bg-primary/20 animate-pulse" />
 
                             {/* Actual percentage bar if available */}
-                            {typeof (job as any)?.progress === 'number' && (job as any).progress > 0 && (
+                            {typeof job?.progress === 'number' && job.progress > 0 && (
                                 <div
                                     className="absolute inset-y-0 left-0 bg-primary transition-all duration-500 ease-out"
-                                    style={{ width: `${(job as any).progress}%` }}
+                                    style={{ width: `${job.progress}%` }}
                                 />
                             )}
                         </div>

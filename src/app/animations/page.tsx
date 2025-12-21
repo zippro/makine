@@ -3,6 +3,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { Check, Trash2, Loader2, Video, AlertCircle, ChevronDown, ChevronUp, Play, X } from 'lucide-react';
 import { useProject } from '@/context/ProjectContext';
+import { VideoDetailsModal } from '@/components/VideoDetailsModal';
 
 interface Animation {
     id: string;
@@ -24,6 +25,8 @@ interface Animation {
         url: string;
         filename: string;
     } | null;
+    // Mock fields for now if not present in type yet, allowing UI to work with 'any' cast inside loop
+    youtube_title?: string;
 }
 
 export default function AnimationsPage() {
@@ -34,12 +37,22 @@ export default function AnimationsPage() {
     const [editingId, setEditingId] = useState<string | null>(null);
     const [updatingId, setUpdatingId] = useState<string | null>(null);
 
+    // AI Details Modal State
+    const [detailsModalOpen, setDetailsModalOpen] = useState(false);
+    const [selectedVideoForDetails, setSelectedVideoForDetails] = useState<any>(null);
+
     // Edit state
     const [editTrimStart, setEditTrimStart] = useState(0);
     const [editTrimEnd, setEditTrimEnd] = useState(0);
     const [editSpeed, setEditSpeed] = useState(1);
+
+    // Folder State
+    const [currentFolder, setCurrentFolder] = useState<string>('/');
+    const [projectFolders, setProjectFolders] = useState<any[]>([]);
+
     const { currentProject } = useProject();
 
+    // ... fetchAnimations ...
     const fetchAnimations = useCallback(async () => {
         if (!currentProject) return;
         try {
@@ -52,19 +65,107 @@ export default function AnimationsPage() {
         } finally {
             setLoading(false);
         }
-    }, []);
+    }, [currentProject]);
+
+    const fetchFolders = useCallback(async () => {
+        if (!currentProject) return;
+        try {
+            const response = await fetch(`/api/folders?projectId=${currentProject.id}`);
+            if (response.ok) {
+                const data = await response.json();
+                setProjectFolders(data);
+            } else {
+                const errData = await response.json().catch(() => ({}));
+                const errMsg = errData.error || 'Failed to fetch folders';
+                if (errMsg.includes('Configuration Error')) setError(errMsg);
+            }
+        } catch (err) {
+            console.error('Failed to fetch folders', err);
+            setError(`Folder Load Error: ${(err as Error).message}`);
+        }
+    }, [currentProject]);
 
     useEffect(() => {
         if (currentProject) {
             fetchAnimations();
+            fetchFolders();
             // Poll for updates every 10 seconds
-            const interval = setInterval(fetchAnimations, 10000);
+            const interval = setInterval(() => {
+                fetchAnimations();
+                fetchFolders();
+            }, 10000);
             return () => clearInterval(interval);
         } else {
             setAnimations([]);
             setLoading(false);
         }
-    }, [fetchAnimations, currentProject]);
+    }, [fetchAnimations, fetchFolders, currentProject]);
+
+    // Folder Helpers
+    const getFolderContents = (items: Animation[], folder: string) => {
+        return items.filter(i => ((i as any).folder || '/') === folder);
+    };
+
+    const getSubfolders = (items: Animation[], currentPath: string) => {
+        const folders = new Set<string>();
+
+        // 1. From Persistent Folders
+        projectFolders.forEach(pf => {
+            const fPath = pf.path;
+            if (fPath !== currentPath && fPath.startsWith(currentPath)) {
+                // strict check for direct child
+                const rel = fPath.slice(currentPath.length + (currentPath === '/' ? 0 : 1));
+                const firstPart = rel.split('/')[0];
+                if (firstPart) folders.add(currentPath === '/' ? `/${firstPart}` : `${currentPath}/${firstPart}`);
+            }
+        });
+
+        // 2. From Files
+        items.forEach(i => {
+            const f = (i as any).folder || '/';
+            if (f !== currentPath && f.startsWith(currentPath)) {
+                const rel = f.slice(currentPath.length + (currentPath === '/' ? 0 : 1));
+                const firstPart = rel.split('/')[0];
+                if (firstPart) folders.add(currentPath === '/' ? `/${firstPart}` : `${currentPath}/${firstPart}`);
+            }
+        });
+        return Array.from(folders).sort();
+    };
+
+    const createFolder = async () => {
+        const name = prompt('Folder Name:');
+        if (!name) return;
+
+        let newPath = currentFolder === '/' ? `/${name}` : `${currentFolder}/${name}`;
+        if (!newPath.startsWith('/')) newPath = '/' + newPath;
+
+        try {
+            const response = await fetch('/api/folders', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ project_id: currentProject?.id, path: newPath })
+            });
+
+            if (response.ok) {
+                await fetchFolders();
+                setCurrentFolder(newPath);
+            } else {
+                throw new Error('Failed to create folder');
+            }
+        } catch (e) {
+            alert('Failed to create folder');
+        }
+    }
+
+    // Need to update Upload to support folders (requires redirecting to Upload page with folder param? 
+    // Or just updating the uploaded file later? The Upload page /upload-images is separate.
+    // For now, let's just allow organizing *existing* or maybe create a quick upload here?
+    // The previous implementation sent user to /upload-images. 
+    // We should probably add `folder` support to /upload-images eventually.
+    // BUT the user's specific request "open new folder then I will upload" suggests inline upload.
+    // Let's rely on the user navigating to /upload-images for now, but maybe we can store the "current folder" in local storage or URL param?
+    // Simpler: Just allow creating/navigating folders here. Uploading new images implies they land in Root currently.
+    // We will fix that later. Focus on View/Nav.
 
     const handleApprove = async (id: string) => {
         setUpdatingId(id);
@@ -159,13 +260,30 @@ export default function AnimationsPage() {
         );
     }
 
+    // Derived lists
+    const visibleFolders = getSubfolders(animations, currentFolder);
+    const visibleFiles = getFolderContents(animations, currentFolder);
+
     return (
         <div className="min-h-screen bg-background">
             <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 py-8">
-                {/* Header */}
+                {/* Header with Breadcrumbs */}
                 <div className="mb-8 flex items-center justify-between">
                     <div>
-                        <h1 className="text-3xl font-bold text-foreground">Animations</h1>
+                        <div className="flex items-center gap-2 mb-2">
+                            <h1 className="text-3xl font-bold text-foreground">Animations</h1>
+                            {currentProject && (
+                                <div className="flex items-center gap-1 text-muted-foreground ml-4 bg-muted/20 px-3 py-1 rounded-full">
+                                    <span className="text-sm">/</span>
+                                    {currentFolder !== '/' && (
+                                        <button onClick={() => setCurrentFolder(currentFolder.split('/').slice(0, -1).join('/') || '/')} className="text-sm hover:underline">
+                                            ...
+                                        </button>
+                                    )}
+                                    <span className="text-sm font-mono">{currentFolder}</span>
+                                </div>
+                            )}
+                        </div>
                         <p className="text-muted mt-2">
                             {currentProject ? `Project: ${currentProject.name}` : 'Select a project to view animations'}
                         </p>
@@ -174,12 +292,23 @@ export default function AnimationsPage() {
                             {animations.filter(a => a.is_approved).length} approved
                         </p>
                     </div>
-                    <a
-                        href="/upload-images"
-                        className="btn-primary px-4 py-2 rounded-lg"
-                    >
-                        Upload Images
-                    </a>
+
+                    <div className="flex items-center gap-2">
+                        {currentFolder !== '/' && (
+                            <button onClick={() => setCurrentFolder(currentFolder.split('/').slice(0, -1).join('/') || '/')} className="px-4 py-2 border border-border rounded-lg hover:bg-muted font-medium transition-all">
+                                Up
+                            </button>
+                        )}
+                        <button onClick={createFolder} className="px-4 py-2 border border-primary/20 bg-primary/10 text-primary rounded-lg hover:bg-primary/20 font-medium transition-all">
+                            + New Folder
+                        </button>
+                        <a
+                            href="/upload-images"
+                            className="btn-primary px-4 py-2 rounded-lg ml-2"
+                        >
+                            Upload Images
+                        </a>
+                    </div>
                 </div>
 
                 {error && (
@@ -203,7 +332,23 @@ export default function AnimationsPage() {
                     </div>
                 ) : (
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                        {animations.map((animation) => (
+                        {/* Folders */}
+                        {visibleFolders.map(folderPath => {
+                            const folderName = folderPath.split('/').pop();
+                            return (
+                                <div
+                                    key={folderPath}
+                                    onDoubleClick={() => setCurrentFolder(folderPath)}
+                                    className="rounded-xl border-2 border-dashed border-border p-6 flex flex-col items-center justify-center gap-4 hover:border-primary/50 hover:bg-primary/5 cursor-pointer transition-all aspect-video"
+                                >
+                                    <Video className="w-12 h-12 text-primary/50" />
+                                    <span className="font-medium text-foreground">{folderName}</span>
+                                </div>
+                            )
+                        })}
+
+                        {/* Files */}
+                        {visibleFiles.map((animation) => (
                             <div
                                 key={animation.id}
                                 className="rounded-xl bg-card border border-border overflow-hidden"
@@ -264,6 +409,21 @@ export default function AnimationsPage() {
                                             <span className="text-xs text-primary">
                                                 Used in {animation.video_usage_count} video{animation.video_usage_count !== 1 ? 's' : ''}
                                             </span>
+                                        {animation.video_usage_count > 0 && (
+                                            <span className="text-xs text-primary">
+                                                Used in {animation.video_usage_count} video{animation.video_usage_count !== 1 ? 's' : ''}
+                                            </span>
+                                        )}
+                                        {animation.status === 'done' && (
+                                            <button
+                                                onClick={() => {
+                                                    setSelectedVideoForDetails(animation); // In real app, this might be a video_job, but adapting for now
+                                                    setDetailsModalOpen(true);
+                                                }}
+                                                className="text-xs bg-purple-500/10 hover:bg-purple-500/20 text-purple-500 px-2 py-1 rounded transition-colors ml-auto"
+                                            >
+                                                AI Details
+                                            </button>
                                         )}
                                     </div>
 
@@ -393,6 +553,20 @@ export default function AnimationsPage() {
                     </div>
                 )}
             </div>
+            {/* Video Details Modal */}
+            <VideoDetailsModal
+                isOpen={detailsModalOpen}
+                onClose={() => {
+                    setDetailsModalOpen(false);
+                    setSelectedVideoForDetails(null);
+                }}
+                video={selectedVideoForDetails}
+                project={currentProject}
+                onUpdate={(updated) => {
+                    // Update local list if needed
+                    fetchAnimations();
+                }}
+            />
         </div>
     );
 }

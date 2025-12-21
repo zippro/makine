@@ -43,7 +43,7 @@ export async function POST(request: NextRequest) {
     try {
         const supabase = await createClient();
         const body = await request.json();
-        const { url, filename, file_size, duration_seconds, project_id } = body;
+        const { url, filename, file_size, duration_seconds, project_id, folder } = body;
 
         if (!url || !filename || !project_id) {
             return NextResponse.json(
@@ -60,6 +60,7 @@ export async function POST(request: NextRequest) {
                 file_size,
                 duration_seconds,
                 project_id,
+                folder: folder || '/',
             })
             .select()
             .single();
@@ -79,6 +80,39 @@ export async function POST(request: NextRequest) {
             { error: 'Internal server error' },
             { status: 500 }
         );
+    }
+}
+
+// PATCH /api/music - Update music entry (e.g. folder)
+export async function PATCH(request: NextRequest) {
+    try {
+        const supabase = await createClient();
+        const body = await request.json();
+        const { id, folder } = body;
+
+        if (!id) {
+            return NextResponse.json({ error: 'Missing music id' }, { status: 400 });
+        }
+
+        const updateData: Record<string, unknown> = {};
+        if (folder !== undefined) updateData.folder = folder;
+
+        const { data, error } = await supabase
+            .from('music_library')
+            .update(updateData)
+            .eq('id', id)
+            .select()
+            .single();
+
+        if (error) {
+            console.error('Error updating music:', error);
+            return NextResponse.json({ error: 'Failed to update music' }, { status: 500 });
+        }
+
+        return NextResponse.json(data);
+    } catch (error) {
+        console.error('Error in PATCH /api/music:', error);
+        return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
     }
 }
 

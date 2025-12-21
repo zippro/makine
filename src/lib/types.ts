@@ -32,7 +32,13 @@ export interface Project {
     channel_id?: string;
   };
   video_mode?: 'simple_animation' | 'multi_animation' | 'image_slideshow';
-  template_assets?: any[]; // Using any[] for flexibility, or stronger type if preferred
+  template_assets?: {
+    id: string;
+    type: 'animation' | 'image';
+    url: string;
+    duration: number;
+    loop_count?: number; // New: Repeat count for animations
+  }[];
   overlay_config?: {
     images: any[];
     title: {
@@ -42,8 +48,18 @@ export interface Project {
       position: string;
       font: string;
       fontSize?: number;
+      fade_duration?: number; // New: Fade effect
     };
   };
+  visualizer_config?: { // New: Audio Visualizer
+    enabled: boolean;
+    style: 'bar' | 'line';
+    color: string;
+    position: 'bottom' | 'top';
+  };
+  default_loop_count?: number; // New: Global loop count for animations
+  channel_info?: string; // New: AI Context
+  keywords?: string; // New: AI Context
 }
 
 export interface VideoJob {
@@ -65,6 +81,7 @@ export interface VideoJob {
   error_message: string | null;
   created_at: string;
   updated_at: string;
+  progress?: number; // 0-100
 }
 
 export interface CreateJobInput {

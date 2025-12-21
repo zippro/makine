@@ -44,6 +44,99 @@ export default function Home() {
   const [showMusicPicker, setShowMusicPicker] = useState(false);
   const [draggedMusicIndex, setDraggedMusicIndex] = useState<number | null>(null);
 
+  // Folder State
+  const [currentMusicFolder, setCurrentMusicFolder] = useState<string>('/');
+  const [currentAnimFolder, setCurrentAnimFolder] = useState<string>('/');
+
+  const getFolderContents = (items: any[], folder: string) => {
+    return items.filter(i => (i.folder || '/') === folder);
+  };
+
+  const getSubfolders = (items: any[], currentPath: string) => {
+    // Unique folders that start with currentPath
+    const folders = new Set<string>();
+    items.forEach(i => {
+      const f = i.folder || '/';
+      if (f !== currentPath && f.startsWith(currentPath)) {
+        // Extract immediate subfolder
+        const rel = f.slice(currentPath.length + (currentPath === '/' ? 0 : 1));
+        const firstPart = rel.split('/')[0];
+        if (firstPart) folders.add(currentPath === '/' ? `/${firstPart}` : `${currentPath}/${firstPart}`);
+      }
+    });
+    return Array.from(folders);
+  };
+
+  const createFolder = async (type: 'music' | 'animation', folderName: string) => {
+    if (!currentProject) return;
+    // We don't explicit create folders in DB, we just update files to have that folder path.
+    // But to "show" an empty folder, we might need a dedicated table or just UI trickery.
+    // For now, let's treat folders as virtual. User must upload to a folder.
+    // WAIT, User asked to "open new folder then I will upload".
+    // So we need to switch context to that new (virtual) folder.
+    const current = type === 'music' ? currentMusicFolder : currentAnimFolder;
+    const newPath = current === '/' ? `/${folderName}` : `${current}/${folderName}`;
+    if (type === 'music') setCurrentMusicFolder(newPath);
+    else setCurrentAnimFolder(newPath);
+  };
+
+  const handleFileUploadToFolder = async (e: React.ChangeEvent<HTMLInputElement>, type: 'music' | 'animation') => {
+    if (!e.target.files || !e.target.files.length) return;
+    const file = e.target.files[0];
+    const folder = type === 'music' ? currentMusicFolder : currentAnimFolder;
+
+    setIsLoading(true);
+    try {
+      const supabase = createClient();
+      const bucket = type === 'music' ? 'audio' : 'animations';
+      const fileExt = file.name.split('.').pop();
+      const fileName = `${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
+
+      // Upload to Storage
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from(bucket)
+        .upload(fileName, file);
+
+      if (uploadError) throw uploadError;
+
+      const { data: { publicUrl } } = supabase.storage.from(bucket).getPublicUrl(uploadData.path);
+
+      // Save to DB with Folder
+      const table = type === 'music' ? 'music_library' : 'animations';
+      const payload: any = {
+        project_id: currentProject?.id,
+        url: publicUrl,
+        filename: file.name, // Display name
+        folder: folder,
+        // ... other fields based on type
+      };
+
+      if (type === 'music') {
+        // Audio metadata (mock duration for now or get from client)
+        payload.duration_seconds = 0;
+        payload.video_usage_count = 0;
+      } else {
+        payload.duration = 10;
+        payload.is_approved = true;
+        payload.video_usage_count = 0;
+        // Animation logic usually requires separate image upload? Skipping for simplicity as per "files" request
+      }
+
+      const { error: dbError } = await supabase.from(table).insert(payload);
+      if (dbError) throw dbError;
+
+      // Refresh
+      // We need to re-fetch data. simple way:
+      window.location.reload(); // Brute force refresh for now to see data
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+
+
   // Load Data - Project Scoped (with backwards compatibility for legacy items)
   useEffect(() => {
     if (!currentProject) return;
@@ -452,16 +545,56 @@ export default function Home() {
       {/* Animation Picker Modal */}
       {showAnimationPicker && (
         <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
-          <div className="bg-card rounded-2xl max-w-4xl w-full max-h-[80vh] overflow-hidden">
+          <div className="bg-card rounded-2xl max-w-4xl w-full max-h-[80vh] overflow-hidden flex flex-col">
             <div className="p-4 border-b border-border flex items-center justify-between">
-              <h2 className="text-lg font-semibold text-foreground">Select Animation</h2>
-              <button onClick={() => setShowAnimationPicker(false)} className="p-2 text-muted hover:text-foreground">
-                <X className="w-5 h-5" />
-              </button>
+              <div className="flex items-center gap-2 overflow-hidden">
+                <h2 className="text-lg font-semibold text-foreground whitespace-nowrap">Select Animation</h2>
+                <div className="flex items-center gap-1 text-muted-foreground text-sm overflow-hidden text-ellipsis">
+                  <span className="mx-1">/</span>
+                  {currentAnimFolder !== '/' && (
+                    <button onClick={() => setCurrentAnimFolder(currentAnimFolder.split('/').slice(0, -1).join('/') || '/')} className="hover:text-foreground hover:underline">
+                      ...
+                    </button>
+                  )}
+                  <span className="font-mono">{currentAnimFolder}</span>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                {currentAnimFolder !== '/' && (
+                  <button onClick={() => setCurrentAnimFolder(currentAnimFolder.split('/').slice(0, -1).join('/') || '/')} className="p-2 bg-muted/50 rounded-lg hover:bg-muted">
+                    Up
+                  </button>
+                )}
+                <button onClick={() => {
+                  const name = prompt('Folder Name:');
+                  if (name) createFolder('animation', name);
+                }} className="p-2 bg-primary/10 text-primary rounded-lg hover:bg-primary/20">
+                  <Plus className="w-5 h-5" />
+                </button>
+                <label className="p-2 bg-primary/10 text-primary rounded-lg hover:bg-primary/20 cursor-pointer">
+                  <Upload className="w-5 h-5" />
+                  <input type="file" accept="video/mp4,video/webm" className="hidden" onChange={(e) => handleFileUploadToFolder(e, 'animation')} />
+                </label>
+                <button onClick={() => setShowAnimationPicker(false)} className="p-2 text-muted hover:text-foreground">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
             </div>
             <div className="p-4 overflow-y-auto max-h-[60vh]">
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-                {animations.map((anim) => {
+                {/* Folders */}
+                {getSubfolders(animations, currentAnimFolder).map(folderPath => {
+                  const folderName = folderPath.split('/').pop();
+                  return (
+                    <button key={folderPath} onDoubleClick={() => setCurrentAnimFolder(folderPath)} className="group rounded-xl border-2 border-border border-dashed p-4 flex flex-col items-center justify-center gap-3 hover:border-primary/50 hover:bg-primary/5 transition-all">
+                      <FolderOpen className="w-10 h-10 text-primary/50 group-hover:text-primary" />
+                      <span className="text-sm font-medium">{folderName}</span>
+                    </button>
+                  )
+                })}
+
+                {/* Files */}
+                {getFolderContents(animations, currentAnimFolder).map((anim) => {
                   const mode = (currentProject as any)?.video_mode;
                   const isMulti = mode && mode !== 'simple_animation';
                   const isSelected = isMulti
@@ -521,16 +654,56 @@ export default function Home() {
         <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
           <div className="bg-card rounded-2xl max-w-2xl w-full max-h-[80vh] overflow-hidden flex flex-col">
             <div className="p-4 border-b border-border flex items-center justify-between">
-              <h2 className="text-lg font-semibold text-foreground">
-                Add Music {selectedMusic.length > 0 && <span className="text-primary">({selectedMusic.length} selected)</span>}
-              </h2>
-              <button onClick={() => setShowMusicPicker(false)} className="p-2 text-muted hover:text-foreground">
-                <X className="w-5 h-5" />
-              </button>
+              <div className="flex items-center gap-2 overflow-hidden">
+                <h2 className="text-lg font-semibold text-foreground whitespace-nowrap">
+                  Add Music {selectedMusic.length > 0 && <span className="text-primary">({selectedMusic.length} selected)</span>}
+                </h2>
+                <div className="flex items-center gap-1 text-muted-foreground text-sm overflow-hidden text-ellipsis">
+                  <span className="mx-1">/</span>
+                  {currentMusicFolder !== '/' && (
+                    <button onClick={() => setCurrentMusicFolder(currentMusicFolder.split('/').slice(0, -1).join('/') || '/')} className="hover:text-foreground hover:underline">
+                      ...
+                    </button>
+                  )}
+                  <span className="font-mono">{currentMusicFolder}</span>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                {currentMusicFolder !== '/' && (
+                  <button onClick={() => setCurrentMusicFolder(currentMusicFolder.split('/').slice(0, -1).join('/') || '/')} className="p-2 bg-muted/50 rounded-lg hover:bg-muted">
+                    Up
+                  </button>
+                )}
+                <button onClick={() => {
+                  const name = prompt('Folder Name:');
+                  if (name) createFolder('music', name);
+                }} className="p-2 bg-primary/10 text-primary rounded-lg hover:bg-primary/20">
+                  <Plus className="w-5 h-5" />
+                </button>
+                <label className="p-2 bg-primary/10 text-primary rounded-lg hover:bg-primary/20 cursor-pointer">
+                  <Upload className="w-5 h-5" />
+                  <input type="file" accept="audio/mpeg,audio/wav,audio/ogg" className="hidden" onChange={(e) => handleFileUploadToFolder(e, 'music')} />
+                </label>
+                <button onClick={() => setShowMusicPicker(false)} className="p-2 text-muted hover:text-foreground">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
             </div>
             <div className="p-4 overflow-y-auto flex-1">
               <div className="space-y-2">
-                {musicLibrary.map((track) => {
+                {/* Folders */}
+                {getSubfolders(musicLibrary, currentMusicFolder).map(folderPath => {
+                  const folderName = folderPath.split('/').pop();
+                  return (
+                    <button key={folderPath} onDoubleClick={() => setCurrentMusicFolder(folderPath)} className="w-full flex items-center gap-3 p-3 rounded-xl border border-border bg-card/50 hover:border-primary/50 text-left transition-all">
+                      <FolderOpen className="w-5 h-5 text-primary/50" />
+                      <span className="font-medium">{folderName}</span>
+                    </button>
+                  )
+                })}
+
+                {/* Files */}
+                {getFolderContents(musicLibrary, currentMusicFolder).map((track) => {
                   const isSelected = !!selectedMusic.find(m => m.id === track.id);
                   return (
                     <button

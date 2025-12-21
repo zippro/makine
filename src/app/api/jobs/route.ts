@@ -18,13 +18,16 @@ export async function POST(request: NextRequest) {
         // We do this BEFORE validation to know which mode we are in
         const { data: projectData, error: projError } = await supabase
             .from('projects')
-            .select('video_mode, template_assets, overlay_config')
+            .select('video_mode, template_assets, overlay_config, visualizer_config, default_loop_count')
             .eq('id', project_id)
             .single();
 
         const videoMode = projectData?.video_mode || 'simple_animation';
         const templateAssets = projectData?.template_assets || [];
         const overlayConfig = projectData?.overlay_config || { images: [], title: { enabled: true } };
+        const visualizerConfig = (projectData as any)?.visualizer_config; // Cast as any if type not yet updated in DB schema def
+        // We need to fetch default_loop_count now
+
 
         // Validate Mode-Specific Requirements
         if (videoMode === 'simple_animation') {
@@ -77,20 +80,16 @@ export async function POST(request: NextRequest) {
         else {
             // Multi/Slideshow Assets
             // Map template_assets to job assets
-            // Assuming template_assets structure: { type, url, duration }
-            let currentTime = 0;
-            // logic: we don't strictly set start_time for a looped sequence in the backend usually, 
-            // but the worker expects a list.
-            // For now, let's pass the raw list as the "playlist" and the worker handles the looping.
-            // Or better: Pass them as standard assets. 
+            // Include loop_count logic mapping from Project Global Setting
+            const globalLoopCount = projectData?.default_loop_count || 1;
 
-            // To support the "Loop" requirement, the worker likely needs a special flag or we just pass the list.
-            // Let's copy the template assets directly.
-            assets = [...templateAssets];
-            // If it's slideshow, ensure type is image
-            if (videoMode === 'image_slideshow') {
-                assets = assets.map(a => ({ ...a, type: 'image' }));
-            }
+            assets = templateAssets.map((asset: any) => ({
+                ...asset,
+                // Use Global Loop Count for animations
+                loop_count: asset.type === 'animation' ? globalLoopCount : 1,
+                // Ensure type is correct for slideshow
+                type: videoMode === 'image_slideshow' ? 'image' : asset.type
+            }));
         }
 
         // Add Global Overlays (Title)
@@ -109,7 +108,10 @@ export async function POST(request: NextRequest) {
                 style: {
                     fontSize: overlayConfig.title.fontSize || 60,
                     color: 'white',
-                    shadow: true
+                    shadow: true,
+                    // Pass Fade Duration and Style to Worker
+                    fade_duration: overlayConfig.title.fade_duration || 0,
+                    box_style: (overlayConfig.title as any).style || 'standard'
                 },
                 is_overlay: true
             });
@@ -123,7 +125,8 @@ export async function POST(request: NextRequest) {
                 start_time: img.start_time || 0,
                 duration: img.duration || 5,
                 position: img.position || 'center',
-                is_overlay: true // explicit flag if needed
+                fade_duration: img.fade_duration || 0, // Pass Fade
+                is_overlay: true
             })));
         }
 
@@ -151,12 +154,14 @@ export async function POST(request: NextRequest) {
                 animation_id: videoMode === 'simple_animation' ? animation_id : null,
                 title_text,
                 project_id,
-                status: 'pending', // Set to pending initially to avoid race condition with worker
+                status: 'processing', // Temporary lock (allowed status) to prevent worker race condition
                 // Legacy fields shim
                 image_url: mainAnimationUrl || (assets[0]?.url) || '',
                 audio_url: orderedMusic[0]?.url || '',
                 // NEW: Save the full assets logic
-                assets: assets
+                assets: assets,
+                visualizer_config: visualizerConfig, // Pass Visualizer Config to Job
+                default_loop_count: projectData?.default_loop_count || 1 // Save global loop count
             })
             .select()
             .single();
@@ -164,7 +169,7 @@ export async function POST(request: NextRequest) {
         if (insertError) {
             console.error('Error creating job:', insertError);
             return NextResponse.json(
-                { error: 'Failed to create job' },
+                { error: `Database Error: ${insertError.message}` },
                 { status: 500 }
             );
         }
@@ -192,10 +197,10 @@ export async function POST(request: NextRequest) {
         await supabase.from('video_jobs').update({ status: 'queued' }).eq('id', job.id);
 
         return NextResponse.json(job, { status: 201 });
-    } catch (error) {
+    } catch (error: any) {
         console.error('Error in POST /api/jobs:', error);
         return NextResponse.json(
-            { error: 'Internal server error' },
+            { error: `Server Error: ${error.message || error}` },
             { status: 500 }
         );
     }

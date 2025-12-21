@@ -84,3 +84,31 @@ export async function GET(request: NextRequest) {
         );
     }
 }
+// PATCH /api/images - Update image details (e.g. move to folder)
+export async function PATCH(request: NextRequest) {
+    try {
+        const supabase = createAdminClient();
+        const body = await request.json();
+        const { id, folder, project_id } = body;
+
+        if (!id || !project_id) {
+            return NextResponse.json({ error: 'ID and Project ID required' }, { status: 400 });
+        }
+
+        const updates: any = {};
+        if (folder !== undefined) updates.folder = folder;
+
+        const { data, error } = await supabase
+            .from('images')
+            .update(updates)
+            .eq('id', id)
+            .eq('project_id', project_id)
+            .select()
+            .single();
+
+        if (error) throw error;
+        return NextResponse.json(data);
+    } catch (error) {
+        return NextResponse.json({ error: (error as Error).message }, { status: 500 });
+    }
+}
