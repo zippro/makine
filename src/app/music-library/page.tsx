@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { Upload, Music, Loader2, Trash2, Play, Pause, Clock, Folder } from 'lucide-react';
+import { Upload, Music, Loader2, Trash2, Play, Pause, Clock, Folder, FolderOpen } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { useProject } from '@/context/ProjectContext';
 import { MoveAssetModal } from '@/components/MoveAssetModal';
@@ -29,6 +29,10 @@ export default function MusicLibraryPage() {
     // Folder State
     const [currentFolder, setCurrentFolder] = useState<string>('/');
     const [projectFolders, setProjectFolders] = useState<any[]>([]);
+
+    // Drag & Drop State
+    const [draggedTrackId, setDraggedTrackId] = useState<string | null>(null);
+    const [dragOverFolder, setDragOverFolder] = useState<string | null>(null);
 
     const { currentProject } = useProject();
 
@@ -142,13 +146,15 @@ export default function MusicLibraryPage() {
     const handleFileDrop = useCallback((e: React.DragEvent) => {
         e.preventDefault();
         const files = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('audio/'));
-        uploadFiles(files);
-    }, [currentFolder]); // Added dep
+        if (files.length > 0) {
+            uploadFiles(files);
+        }
+    }, [currentFolder, currentProject]);
 
     const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
         const files = Array.from(e.target.files || []).filter(f => f.type.startsWith('audio/'));
         uploadFiles(files);
-    }, [currentFolder]); // Added dep
+    }, [currentFolder, currentProject]);
 
     const uploadFiles = async (files: File[]) => {
         if (files.length === 0) return;
@@ -279,6 +285,42 @@ export default function MusicLibraryPage() {
         return `${mb.toFixed(2)} MB`;
     };
 
+    // --- Drag & Drop Handlers (Item Moving) ---
+    const handleDragStart = (e: React.DragEvent, id: string) => {
+        setDraggedTrackId(id);
+        e.dataTransfer.effectAllowed = 'move';
+        // Explicitly set text/plain to avoid issues with some browsers/OS
+        e.dataTransfer.setData('text/plain', id);
+    };
+
+    const handleDragOver = (e: React.DragEvent, folderPath: string) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        setDragOverFolder(folderPath);
+    };
+
+    const handleDragLeave = (e: React.DragEvent) => {
+        e.preventDefault();
+        // Optional: clear dragOverFolder if leaving the drop zone completely
+    };
+
+    const handleDrop = async (e: React.DragEvent, targetFolder: string) => {
+        e.preventDefault();
+        setDragOverFolder(null);
+
+        // Check if it's a file upload drop vs item move drop
+        // If draggedTrackId is null, it might be a file upload, handled by container's onDrop
+        if (!draggedTrackId) return;
+
+        try {
+            await handleMove(draggedTrackId, targetFolder);
+        } catch (err) {
+            // Error already handled in handleMove
+        } finally {
+            setDraggedTrackId(null);
+        }
+    };
+
     if (loading) {
         return (
             <div className="min-h-screen bg-background flex items-center justify-center">
@@ -309,7 +351,12 @@ export default function MusicLibraryPage() {
                                 <div className="flex items-center gap-1 text-muted-foreground ml-4 bg-muted/20 px-3 py-1 rounded-full">
                                     <span className="text-sm">/</span>
                                     {currentFolder !== '/' && (
-                                        <button onClick={() => setCurrentFolder(currentFolder.split('/').slice(0, -1).join('/') || '/')} className="text-sm hover:underline">
+                                        <button
+                                            onClick={() => setCurrentFolder(currentFolder.split('/').slice(0, -1).join('/') || '/')}
+                                            onDragOver={(e) => handleDragOver(e, currentFolder.split('/').slice(0, -1).join('/') || '/')}
+                                            onDrop={(e) => handleDrop(e, currentFolder.split('/').slice(0, -1).join('/') || '/')}
+                                            className="text-sm hover:underline"
+                                        >
                                             ...
                                         </button>
                                     )}
@@ -327,7 +374,14 @@ export default function MusicLibraryPage() {
 
                     <div className="flex items-center gap-2">
                         {currentFolder !== '/' && (
-                            <button onClick={() => setCurrentFolder(currentFolder.split('/').slice(0, -1).join('/') || '/')} className="px-4 py-2 border border-border rounded-lg hover:bg-muted font-medium transition-all">
+                            <button
+                                onClick={() => setCurrentFolder(currentFolder.split('/').slice(0, -1).join('/') || '/')}
+                                onDragOver={(e) => handleDragOver(e, currentFolder.split('/').slice(0, -1).join('/') || '/')}
+                                onDrop={(e) => handleDrop(e, currentFolder.split('/').slice(0, -1).join('/') || '/')}
+                                className={`px-4 py-2 border rounded-lg transition-all font-medium flex items-center gap-2
+                                    ${dragOverFolder === (currentFolder.split('/').slice(0, -1).join('/') || '/') ? 'border-primary bg-primary/10 text-primary' : 'border-border hover:bg-muted'}
+                                `}
+                            >
                                 Up
                             </button>
                         )}
@@ -337,7 +391,7 @@ export default function MusicLibraryPage() {
                     </div>
                 </div>
 
-                {/* Drop Zone */}
+                {/* Drop Zone (File Upload) */}
                 <div
                     className="mb-6 p-8 rounded-xl border-2 border-dashed border-border hover:border-primary transition-all cursor-pointer"
                     onDragOver={(e) => e.preventDefault()}
@@ -388,26 +442,42 @@ export default function MusicLibraryPage() {
                         {/* Folders */}
                         {visibleFolders.map(folderPath => {
                             const folderName = folderPath.split('/').pop();
+                            // Calculate count recursively
+                            const count = music.filter(m => {
+                                const f = (m as any).folder || '/';
+                                return f === folderPath || f.startsWith(folderPath + '/');
+                            }).length;
+
+                            const isDragOver = dragOverFolder === folderPath;
+
                             return (
                                 <div
                                     key={folderPath}
                                     onDoubleClick={() => setCurrentFolder(folderPath)}
-                                    className="flex items-center gap-4 p-4 rounded-xl bg-card border border-border hover:border-primary/50 cursor-pointer transition-all"
+                                    // Drag Handlers
+                                    onDragOver={(e) => handleDragOver(e, folderPath)}
+                                    onDragLeave={handleDragLeave}
+                                    onDrop={(e) => handleDrop(e, folderPath)}
+                                    className={`flex items-center gap-4 p-4 rounded-xl bg-card border cursor-pointer transition-all
+                                        ${isDragOver
+                                            ? 'border-primary bg-primary/10 scale-[1.01] shadow-lg'
+                                            : 'border-border hover:border-primary/50'
+                                        }
+                                    `}
                                 >
-                                    <div className="p-3 rounded-full bg-primary/10 text-primary">
-                                        {/* We need FolderIcon import, using Loader2 placeholder if missing or importing dynamically? 
-                                            Wait, I imported Upload, Music, etc. I need to add Folder to imports or use Music as placeholder with diff color
-                                         */}
-                                        {/* Assuming Folder icon is available, waiting for lint check? 
-                                             Lets look at imports: import { Upload, Music, Loader2, Trash2, Play, Pause, Clock } from 'lucide-react';
-                                             I need to ADD Folder to imports.
-                                         */}
-                                        <Music className="w-5 h-5 text-primary" />
+                                    <div className={`p-3 rounded-full ${isDragOver ? 'bg-primary text-white' : 'bg-primary/10 text-primary'}`}>
+                                        {isDragOver ? <FolderOpen className="w-5 h-5 animate-pulse" /> : <Folder className="w-5 h-5" />}
                                     </div>
                                     <div className="flex-1">
-                                        <p className="font-medium text-foreground">{folderName}</p>
-                                        <p className="text-xs text-muted">Folder</p>
+                                        <p className={`font-medium ${isDragOver ? 'text-primary' : 'text-foreground'}`}>{folderName}</p>
+                                        <p className="text-xs text-muted">{count} music file{count !== 1 ? 's' : ''}</p>
                                     </div>
+
+                                    {isDragOver && (
+                                        <div className="text-xs font-bold text-primary animate-pulse mr-4">
+                                            DROP TO MOVE
+                                        </div>
+                                    )}
                                 </div>
                             )
                         })}
@@ -416,11 +486,15 @@ export default function MusicLibraryPage() {
                         {visibleFiles.map((track) => (
                             <div
                                 key={track.id}
-                                className="flex items-center gap-4 p-4 rounded-xl bg-card border border-border hover:border-primary/50 transition-all"
+                                draggable
+                                onDragStart={(e) => handleDragStart(e, track.id)}
+                                className={`flex items-center gap-4 p-4 rounded-xl bg-card border transition-all
+                                    ${draggedTrackId === track.id ? 'opacity-50 border-primary border-dashed' : 'border-border hover:border-primary/50'}
+                                `}
                             >
                                 <button
                                     onClick={() => togglePlay(track)}
-                                    className="p-3 rounded-full bg-primary/10 text-primary hover:bg-primary hover:text-white transition-all"
+                                    className="p-3 rounded-full bg-primary/10 text-primary hover:bg-primary hover:text-black transition-all"
                                 >
                                     {playingId === track.id ? (
                                         <Pause className="w-5 h-5" />

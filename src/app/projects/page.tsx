@@ -71,7 +71,11 @@ export default function ProjectsPage() {
                     <button
                         type="submit"
                         disabled={!newProjectName.trim() || isCreating}
-                        className="bg-primary hover:bg-primary-hover text-white px-6 py-2 rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        className={`px-6 py-2 rounded-lg font-medium transition-all duration-200 
+                            ${!newProjectName.trim() || isCreating
+                                ? "bg-primary/20 text-primary/40 cursor-not-allowed border border-primary/10"
+                                : "bg-primary hover:bg-primary-hover text-white shadow-lg shadow-primary/20 hover:scale-105"
+                            }`}
                     >
                         {isCreating ? "Creating..." : "Create"}
                     </button>

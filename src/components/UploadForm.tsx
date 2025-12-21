@@ -295,7 +295,7 @@ export function UploadForm({ onSubmit, isLoading }: UploadFormProps) {
             <button
                 type="submit"
                 disabled={isLoading || !imageFile || !audioFile || !title.trim()}
-                className="btn-primary w-full py-4 rounded-xl text-white font-semibold text-lg flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
+                className="btn-primary w-full py-4 rounded-xl font-semibold text-lg flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
             >
                 {isLoading ? (
                     <>

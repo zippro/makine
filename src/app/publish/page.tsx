@@ -35,7 +35,7 @@ export default function PublishPage() {
             <div className="max-w-6xl mx-auto space-y-8">
                 <header className="flex justify-between items-center bg-card p-6 rounded-2xl border border-border">
                     <div>
-                        <h1 className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-red-500 to-purple-600">
+                        <h1 className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-white to-zinc-500">
                             Channel Timeline
                         </h1>
                         <p className="text-muted mt-1">Manage scheduling and YouTube publication for {currentProject?.name}</p>

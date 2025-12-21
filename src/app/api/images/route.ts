@@ -9,7 +9,7 @@ export async function POST(request: NextRequest) {
         // Use Admin Client to bypass RLS in Dev Mode
         const supabase = createAdminClient();
         const body = await request.json();
-        const { url, filename, file_size, width, height, project_id } = body;
+        const { url, filename, file_size, width, height, project_id, folder } = body;
 
         if (!url || !filename || !project_id) {
             return NextResponse.json(
@@ -26,7 +26,8 @@ export async function POST(request: NextRequest) {
                 file_size,
                 width,
                 height,
-                project_id
+                project_id,
+                folder // Add folder field
             })
             .select()
             .single();
@@ -109,6 +110,45 @@ export async function PATCH(request: NextRequest) {
         if (error) throw error;
         return NextResponse.json(data);
     } catch (error) {
+        return NextResponse.json({ error: (error as Error).message }, { status: 500 });
+    }
+}
+
+// DELETE /api/images - Delete image
+export async function DELETE(request: NextRequest) {
+    try {
+        const supabase = createAdminClient();
+        const { searchParams } = new URL(request.url);
+        const id = searchParams.get('id');
+
+        if (!id) {
+            return NextResponse.json({ error: 'ID required' }, { status: 400 });
+        }
+
+        // 1. Get image details first
+        const { data: image, error: fetchError } = await supabase
+            .from('images')
+            .select('*')
+            .eq('id', id)
+            .single();
+
+        if (fetchError || !image) {
+            return NextResponse.json({ error: 'Image not found' }, { status: 404 });
+        }
+
+        // 2. Delete from DB
+        const { error: deleteError } = await supabase
+            .from('images')
+            .delete()
+            .eq('id', id);
+
+        if (deleteError) {
+            throw deleteError;
+        }
+
+        return NextResponse.json({ success: true });
+    } catch (error) {
+        console.error('Error in DELETE /api/images:', error);
         return NextResponse.json({ error: (error as Error).message }, { status: 500 });
     }
 }

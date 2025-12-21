@@ -3,36 +3,18 @@
 @tailwind utilities;
 
 :root {
-  --background: #0a0a0a;
-  --foreground: #ededed;
-  --card: #141414;
-  --card-hover: #1a1a1a;
-  --border: #2a2a2a;
-  --primary: #8b5cf6;
-  --primary-hover: #7c3aed;
-  --success: #22c55e;
+  --background: #000000;
+  --foreground: #ffffff;
+  --card: #0a0a0a;
+  --card-hover: #121212;
+  --border: #27272a;
+  --primary: #ffffff;
+  --primary-hover: #e4e4e7;
+  --success: #10b981;
   --warning: #f59e0b;
   --error: #ef4444;
-  --muted: #737373;
+  --muted: #a1a1aa;
 }
-
-/* 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --color-card: var(--card);
-  --color-card-hover: var(--card-hover);
-  --color-border: var(--border);
-  --color-primary: var(--primary);
-  --color-primary-hover: var(--primary-hover);
-  --color-success: var(--success);
-  --color-warning: var(--warning);
-  --color-error: var(--error);
-  --color-muted: var(--muted);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-*/
 
 * {
   box-sizing: border-box;
@@ -41,14 +23,14 @@
 body {
   background: var(--background);
   color: var(--foreground);
-  /* font-family: var(--font-sans), Arial, Helvetica, sans-serif; */
   min-height: 100vh;
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
 }
 
 /* Custom scrollbar */
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 6px;
+  height: 6px;
 }
 
 ::-webkit-scrollbar-track {
@@ -57,7 +39,7 @@ body {
 
 ::-webkit-scrollbar-thumb {
   background: var(--border);
-  border-radius: 4px;
+  border-radius: 99px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
@@ -66,56 +48,64 @@ body {
 
 /* File drop zone animations */
 .drop-zone {
-  transition: all 0.2s ease-in-out;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .drop-zone.dragging {
   border-color: var(--primary);
-  background: rgba(139, 92, 246, 0.1);
-  transform: scale(1.02);
+  background: rgba(255, 255, 255, 0.05);
+  /* White tint */
+  transform: scale(1.01);
 }
 
 /* Status badge animations */
 .status-badge {
-  animation: pulse 2s infinite;
+  animation: pulse 3s infinite;
 }
 
 @keyframes pulse {
-  0%, 100% {
-    opacity: 1;
+
+  0%,
+  100% {
+    opacity: 0.8;
   }
+
   50% {
-    opacity: 0.7;
+    opacity: 0.4;
   }
 }
 
-/* Gradient text */
+/* Gradient text - Minimal White to Metal */
 .gradient-text {
-  background: linear-gradient(135deg, #8b5cf6, #06b6d4);
+  background: linear-gradient(135deg, #ffffff 0%, #a1a1aa 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
 }
 
-/* Card hover effect */
+/* Card hover effect - Subtle Glow */
 .card-hover {
-  transition: all 0.2s ease-in-out;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .card-hover:hover {
   transform: translateY(-2px);
-  box-shadow: 0 10px 40px rgba(139, 92, 246, 0.15);
+  border-color: var(--border);
+  box-shadow: 0 12px 30px -10px rgba(255, 255, 255, 0.05);
 }
 
-/* Button styles */
+/* Button styles - Solid White, Black Text */
 .btn-primary {
-  background: linear-gradient(135deg, var(--primary), #7c3aed);
-  transition: all 0.2s ease-in-out;
+  background: var(--primary);
+  color: black;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  font-weight: 600;
 }
 
 .btn-primary:hover {
+  background: var(--primary-hover);
   transform: translateY(-1px);
-  box-shadow: 0 4px 20px rgba(139, 92, 246, 0.4);
+  box-shadow: 0 4px 12px rgba(255, 255, 255, 0.15);
 }
 
 .btn-primary:disabled {
@@ -127,13 +117,14 @@ body {
 
 /* Loading spinner */
 .spinner {
-  animation: spin 1s linear infinite;
+  animation: spin 0.8s linear infinite;
 }
 
 @keyframes spin {
   from {
     transform: rotate(0deg);
   }
+
   to {
     transform: rotate(360deg);
   }
@@ -141,30 +132,20 @@ body {
 
 /* Progress bar */
 .progress-bar {
-  background: linear-gradient(90deg, var(--primary), #06b6d4);
-  animation: progress-animation 2s ease-in-out infinite;
-}
-
-@keyframes progress-animation {
-  0% {
-    background-position: 0% 50%;
-  }
-  50% {
-    background-position: 100% 50%;
-  }
-  100% {
-    background-position: 0% 50%;
-  }
+  background: var(--primary);
+  /* Optional: subtle shimmy if needed, but solid is more minimal */
 }
 
 /* Video player container */
 .video-container {
   position: relative;
   width: 100%;
-  padding-top: 56.25%; /* 16:9 aspect ratio */
+  padding-top: 56.25%;
+  /* 16:9 aspect ratio */
   background: var(--card);
-  border-radius: 12px;
+  border-radius: 16px;
   overflow: hidden;
+  border: 1px solid var(--border);
 }
 
 .video-container video {
@@ -173,5 +154,5 @@ body {
   left: 0;
   width: 100%;
   height: 100%;
-  object-fit: contain;
+  object-fit: cover;
 }

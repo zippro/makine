@@ -1,7 +1,9 @@
+
 "use client";
 
 import { useState, useEffect } from "react";
-import { X, Save, AlertCircle, Youtube, Loader2, Play, Layers, List, Image as ImageIcon, Trash2, GripVertical, Type, Plus, ChevronUp, ChevronDown, Upload, Music } from "lucide-react";
+import { Trash2, Plus, X, Save, AlertCircle, Loader2, GripVertical, Settings, Play, List, Layers, Youtube, ChevronUp, ChevronDown, Type, Upload, ImageIcon, Music } from 'lucide-react';
+import { useEscapeKey } from '@/hooks/useEscapeKey';
 import { Project } from "@/lib/types";
 import { createClient } from "@/lib/supabase/client";
 
@@ -54,6 +56,7 @@ interface OverlayConfig {
 }
 
 export function ProjectConfigModal({ project, isOpen, onClose, onUpdate }: ProjectConfigModalProps) {
+    useEscapeKey(onClose);
     const [activeTab, setActiveTab] = useState<Tab>('mode');
 
     // Youtube State
@@ -110,7 +113,7 @@ export function ProjectConfigModal({ project, isOpen, onClose, onUpdate }: Proje
             setVisualizerConfig((project as any).visualizer_config || { enabled: false, style: 'bar', color: '#ffffff', position: 'bottom' });
 
             // Fetch Fonts
-            fetch(`/api/fonts?projectId=${project.id}`)
+            fetch(`/ api / fonts ? projectId = ${project.id} `)
                 .then(res => res.json())
                 .then(data => { if (Array.isArray(data)) setProjectFonts(data); })
                 .catch(console.error);
@@ -270,7 +273,7 @@ export function ProjectConfigModal({ project, isOpen, onClose, onUpdate }: Proje
                             <button
                                 key={tab.id}
                                 onClick={() => setActiveTab(tab.id)}
-                                className={`w-full flex items-center gap-3 p-3 rounded-xl text-left transition-colors ${activeTab === tab.id ? 'bg-primary/10 text-primary border border-primary/20' : 'hover:bg-white/5 text-muted hover:text-foreground'}`}
+                                className={`w - full flex items - center gap - 3 p - 3 rounded - xl text - left transition - colors ${activeTab === tab.id ? 'bg-primary/10 text-primary border border-primary/20' : 'hover:bg-white/5 text-muted hover:text-foreground'} `}
                             >
                                 <tab.icon className="w-5 h-5" />
                                 <span className="font-medium">{tab.label}</span>
@@ -357,9 +360,9 @@ export function ProjectConfigModal({ project, isOpen, onClose, onUpdate }: Proje
                                             key={mode.id}
                                             type="button"
                                             onClick={() => setVideoMode(mode.id)}
-                                            className={`w-full flex items-start gap-4 p-4 rounded-xl text-left border-2 transition-all ${videoMode === mode.id ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/50 bg-card'}`}
+                                            className={`w - full flex items - start gap - 4 p - 4 rounded - xl text - left border - 2 transition - all ${videoMode === mode.id ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/50 bg-card'} `}
                                         >
-                                            <div className={`mt-0.5 w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 ${videoMode === mode.id ? 'border-primary' : 'border-muted'}`}>
+                                            <div className={`mt - 0.5 w - 5 h - 5 rounded - full border - 2 flex items - center justify - center flex - shrink - 0 ${videoMode === mode.id ? 'border-primary' : 'border-muted'} `}>
                                                 {videoMode === mode.id && <div className="w-2.5 h-2.5 rounded-full bg-primary" />}
                                             </div>
                                             <div>
@@ -583,7 +586,7 @@ export function ProjectConfigModal({ project, isOpen, onClose, onUpdate }: Proje
                                                                     if (!confirm('Delete this font?')) return;
                                                                     const font = projectFonts.find(f => f.name === overlayConfig.title.font);
                                                                     if (font) {
-                                                                        await fetch(`/api/fonts?id=${font.id}`, { method: 'DELETE' });
+                                                                        await fetch(`/ api / fonts ? id = ${font.id} `, { method: 'DELETE' });
                                                                         setProjectFonts(prev => prev.filter(p => p.id !== font.id));
                                                                         setOverlayConfig({
                                                                             ...overlayConfig,
@@ -616,7 +619,7 @@ export function ProjectConfigModal({ project, isOpen, onClose, onUpdate }: Proje
                                                                         // 1. Upload
                                                                         const supabase = createClient();
                                                                         const fileExt = file.name.split('.').pop();
-                                                                        const fileName = `fonts/${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
+                                                                        const fileName = `fonts / ${Date.now()} -${Math.random().toString(36).substring(7)}.${fileExt} `;
 
                                                                         // Try 'assets' bucket first, fallback to 'uploads'
                                                                         let bucket = 'assets';
@@ -655,7 +658,7 @@ export function ProjectConfigModal({ project, isOpen, onClose, onUpdate }: Proje
 
                                                                     } catch (err: any) {
                                                                         console.error('Font upload failed', err);
-                                                                        alert(`Failed to upload font: ${err.message}`);
+                                                                        alert(`Failed to upload font: ${err.message} `);
                                                                     }
                                                                 }}
                                                             />
@@ -773,7 +776,7 @@ export function ProjectConfigModal({ project, isOpen, onClose, onUpdate }: Proje
                                                                     try {
                                                                         const supabase = createClient();
                                                                         const fileExt = file.name.split('.').pop();
-                                                                        const fileName = `overlay-${Date.now()}-${Math.random()}.${fileExt}`;
+                                                                        const fileName = `overlay - ${Date.now()} -${Math.random()}.${fileExt} `;
                                                                         // Use 'uploads' bucket as it is known to work
                                                                         const { error: upErr } = await supabase.storage.from('uploads').upload(fileName, file);
                                                                         if (upErr) throw upErr;
@@ -937,7 +940,7 @@ export function ProjectConfigModal({ project, isOpen, onClose, onUpdate }: Proje
                     <button
                         onClick={() => handleSave()}
                         disabled={isLoading}
-                        className="btn-primary px-6 py-2 rounded-lg text-white text-sm font-medium flex items-center gap-2 disabled:opacity-50"
+                        className="btn-primary px-6 py-2 rounded-lg text-sm font-medium flex items-center gap-2 disabled:opacity-50"
                     >
                         {isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                         Save Settings

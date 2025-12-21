@@ -16,6 +16,8 @@ interface Animation {
   is_approved: boolean;
   video_usage_count: number;
   images: { url: string; filename: string } | null;
+  folder?: string;
+  created_at?: string;
 }
 
 interface MusicTrack {
@@ -522,7 +524,7 @@ export default function Home() {
                 <button
                   type="submit"
                   disabled={isLoading || selectedMusic.length === 0 || !title.trim()}
-                  className="btn-primary w-full py-4 rounded-xl text-white font-semibold text-lg flex items-center justify-center gap-2 disabled:opacity-50"
+                  className="btn-primary w-full py-4 rounded-xl font-semibold text-lg flex items-center justify-center gap-2 disabled:opacity-50"
                 >
                   {isLoading ? (
                     <>
@@ -583,15 +585,29 @@ export default function Home() {
             <div className="p-4 overflow-y-auto max-h-[60vh]">
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
                 {/* Folders */}
-                {getSubfolders(animations, currentAnimFolder).map(folderPath => {
-                  const folderName = folderPath.split('/').pop();
-                  return (
-                    <button key={folderPath} onDoubleClick={() => setCurrentAnimFolder(folderPath)} className="group rounded-xl border-2 border-border border-dashed p-4 flex flex-col items-center justify-center gap-3 hover:border-primary/50 hover:bg-primary/5 transition-all">
-                      <FolderOpen className="w-10 h-10 text-primary/50 group-hover:text-primary" />
-                      <span className="text-sm font-medium">{folderName}</span>
-                    </button>
-                  )
-                })}
+                {(() => {
+                  // Logic to sort folders by most recent item
+                  const subfolders = getSubfolders(animations, currentAnimFolder);
+                  return subfolders.sort((a, b) => {
+                    // Find latest item in folder A
+                    const aItems = animations.filter(i => (i.folder || '/').startsWith(a));
+                    const aLatest = aItems.reduce((max, i) => (i.created_at || '') > max ? (i.created_at || '') : max, '');
+
+                    // Find latest item in folder B
+                    const bItems = animations.filter(i => (i.folder || '/').startsWith(b));
+                    const bLatest = bItems.reduce((max, i) => (i.created_at || '') > max ? (i.created_at || '') : max, '');
+
+                    return bLatest.localeCompare(aLatest); // Descending
+                  }).map(folderPath => {
+                    const folderName = folderPath.split('/').pop();
+                    return (
+                      <button key={folderPath} onDoubleClick={() => setCurrentAnimFolder(folderPath)} className="group rounded-xl border-2 border-border border-dashed p-4 flex flex-col items-center justify-center gap-3 hover:border-primary/50 hover:bg-primary/5 transition-all">
+                        <FolderOpen className="w-10 h-10 text-primary/50 group-hover:text-primary" />
+                        <span className="text-sm font-medium">{folderName}</span>
+                      </button>
+                    )
+                  });
+                })()}
 
                 {/* Files */}
                 {getFolderContents(animations, currentAnimFolder).map((anim) => {
@@ -618,7 +634,19 @@ export default function Home() {
                         : 'border-border hover:border-primary'}`}
                     >
                       <div className="aspect-video bg-black relative">
-                        <video src={anim.url!} className="w-full h-full object-cover" muted loop onMouseEnter={e => e.currentTarget.play()} onMouseLeave={e => e.currentTarget.pause()} />
+                        <video
+                          src={anim.url!}
+                          className="w-full h-full object-cover"
+                          muted
+                          loop
+                          playsInline
+                          poster={anim.images?.url}
+                          onMouseEnter={e => e.currentTarget.play()}
+                          onMouseLeave={e => {
+                            e.currentTarget.pause();
+                            e.currentTarget.currentTime = 0;
+                          }}
+                        />
 
                         {/* Selected Checkmark Overlay */}
                         {isSelected && (

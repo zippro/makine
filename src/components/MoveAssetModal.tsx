@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Folder, X, Check, FolderOpen } from "lucide-react";
+import { Loader2, Folder, X, Check } from "lucide-react";
+import { useEscapeKey } from "@/hooks/useEscapeKey";
 import { useProject } from "@/context/ProjectContext";
 
 interface MoveAssetModalProps {
@@ -9,20 +10,21 @@ interface MoveAssetModalProps {
     onClose: () => void;
     currentFolder: string;
     onMove: (targetFolder: string) => Promise<void>;
-    assetType: "music" | "animation" | "image";
+    assetType: "video" | "project" | "animation" | "music" | "image" | "file";
 }
 
-export function MoveAssetModal({ isOpen, onClose, currentFolder, onMove, assetType }: MoveAssetModalProps) {
+export function MoveAssetModal({ isOpen, onClose, currentFolder, onMove, assetType = 'file' }: MoveAssetModalProps) {
+    useEscapeKey(onClose);
     const { currentProject } = useProject();
+    const [loading, setLoading] = useState(false);
     const [folders, setFolders] = useState<any[]>([]);
     const [selectedFolder, setSelectedFolder] = useState<string | null>(null);
-    const [loading, setLoading] = useState(false);
     const [isMoving, setIsMoving] = useState(false);
 
     useEffect(() => {
         if (isOpen && currentProject) {
             setLoading(true);
-            fetch(`/api/folders?projectId=${currentProject.id}`)
+            fetch(`/ api / folders ? projectId = ${currentProject.id} `)
                 .then(res => res.json())
                 .then(data => {
                     setFolders(data);
@@ -73,13 +75,13 @@ export function MoveAssetModal({ isOpen, onClose, currentFolder, onMove, assetTy
                             <button
                                 key={folder.path}
                                 onClick={() => setSelectedFolder(folder.path)}
-                                className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg transition-colors ${selectedFolder === folder.path
-                                        ? "bg-primary/10 text-primary"
-                                        : "hover:bg-muted text-foreground"
-                                    }`}
+                                className={`w - full flex items - center gap - 3 px - 3 py - 2 rounded - lg transition - colors ${selectedFolder === folder.path
+                                    ? "bg-primary/10 text-primary"
+                                    : "hover:bg-muted text-foreground"
+                                    } `}
                                 disabled={folder.path === currentFolder}
                             >
-                                <Folder className={`w-4 h-4 ${selectedFolder === folder.path ? "fill-primary" : ""}`} />
+                                <Folder className={`w - 4 h - 4 ${selectedFolder === folder.path ? "fill-primary" : ""} `} />
                                 <span className="flex-1 text-left truncate">
                                     {folder.path === '/' ? 'Root Folder' : folder.path}
                                 </span>

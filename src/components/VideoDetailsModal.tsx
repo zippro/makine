@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { X, Sparkles, Loader2, Save } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
+import { useEscapeKey } from "@/hooks/useEscapeKey";
 
 interface VideoDetailsModalProps {
     isOpen: boolean;
@@ -13,6 +14,7 @@ interface VideoDetailsModalProps {
 }
 
 export function VideoDetailsModal({ isOpen, onClose, video, project, onUpdate }: VideoDetailsModalProps) {
+    useEscapeKey(onClose);
     const [title, setTitle] = useState(video?.youtube_title || video?.title_text || "");
     const [description, setDescription] = useState(video?.youtube_description || "");
     const [tags, setTags] = useState(video?.youtube_tags ? video.youtube_tags.join(", ") : "");
@@ -83,6 +85,23 @@ export function VideoDetailsModal({ isOpen, onClose, video, project, onUpdate }:
         }
     };
 
+    const handleDeleteVideo = async () => {
+        if (!confirm("Are you sure you want to delete this video?")) return;
+        setIsSaving(true);
+        try {
+            const res = await fetch(`/api/animations?id=${video.id}`, {
+                method: "DELETE"
+            });
+            if (!res.ok) throw new Error("Failed to delete video");
+            onUpdate(null); // Signal deletion
+            onClose();
+        } catch (err: any) {
+            setError(err.message);
+        } finally {
+            setIsSaving(false);
+        }
+    };
+
     return (
         <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
             <div className="bg-card rounded-2xl max-w-2xl w-full border border-border shadow-2xl flex flex-col max-h-[90vh]">
@@ -113,7 +132,7 @@ export function VideoDetailsModal({ isOpen, onClose, video, project, onUpdate }:
                                 <button
                                     onClick={handleGenerateAI}
                                     disabled={isGenerating}
-                                    className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-sm font-medium flex items-center gap-2 transition-all disabled:opacity-50"
+                                    className="px-3 py-1.5 bg-zinc-100 hover:bg-white text-black rounded-lg text-sm font-medium flex items-center gap-2 transition-all disabled:opacity-50 shadow-sm"
                                 >
                                     {isGenerating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
                                     Generate with AI
@@ -162,18 +181,26 @@ export function VideoDetailsModal({ isOpen, onClose, video, project, onUpdate }:
                     </div>
                 </div>
 
-                <div className="p-4 border-t border-border bg-muted/20 flex justify-end gap-3">
-                    <button onClick={onClose} className="px-4 py-2 hover:bg-white/10 rounded-lg text-sm font-medium transition-colors">
-                        Cancel
-                    </button>
+                <div className="p-4 border-t border-border bg-muted/20 flex justify-between items-center">
                     <button
-                        onClick={handleSave}
-                        disabled={isSaving}
-                        className="px-4 py-2 bg-primary text-primary-foreground hover:bg-primary/90 rounded-lg text-sm font-medium flex items-center gap-2 transition-colors disabled:opacity-50"
+                        onClick={handleDeleteVideo}
+                        className="px-4 py-2 hover:bg-red-500/10 text-red-400 hover:text-red-300 rounded-lg text-sm font-medium transition-colors border border-transparent hover:border-red-500/20"
                     >
-                        {isSaving && <Loader2 className="w-4 h-4 animate-spin" />}
-                        Save Details
+                        Delete Video
                     </button>
+                    <div className="flex gap-3">
+                        <button onClick={onClose} className="px-4 py-2 hover:bg-white/10 rounded-lg text-sm font-medium transition-colors">
+                            Cancel
+                        </button>
+                        <button
+                            onClick={handleSave}
+                            disabled={isSaving}
+                            className="px-4 py-2 bg-primary text-primary-foreground hover:bg-primary/90 rounded-lg text-sm font-medium flex items-center gap-2 transition-colors disabled:opacity-50"
+                        >
+                            {isSaving && <Loader2 className="w-4 h-4 animate-spin" />}
+                            Save Details
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>

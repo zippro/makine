@@ -20,6 +20,12 @@ export default function UploadImagesPage() {
     const [projectFolders, setProjectFolders] = useState<any[]>([]);
     const [moveModalState, setMoveModalState] = useState<{ isOpen: boolean; itemId: string | null }>({ isOpen: false, itemId: null });
 
+    // Drag & Drop State
+    const [draggedImageId, setDraggedImageId] = useState<string | null>(null);
+    const [dragOverFolder, setDragOverFolder] = useState<string | null>(null);
+
+    // ... (fetch logic remains same) ...
+
     useEffect(() => {
         if (currentProject) {
             fetch(`/api/images?projectId=${currentProject.id}`)
@@ -50,14 +56,7 @@ export default function UploadImagesPage() {
         }
     }, [currentProject]);
 
-    // Folder helpers (simplified for flat list view of folders)
-    // Actually, for "Upload Images" it might be better to just select a folder from a dropdown?
-    // Or full navigation?
-    // User asked: "show folders at first screen".
-    // I will implement a simpler folder navigation here since it's an upload page?
-    // But existing images grid should probably be organized.
-
-    // Let's implement full nav similar to others for consistency.
+    // Folder helpers
     const getFolderContents = (files: any[], folder: string) => {
         return files.filter(f => (f.folder || '/') === folder);
     };
@@ -120,20 +119,22 @@ export default function UploadImagesPage() {
         // Process all pending items
         const itemsToProcess = progress.filter(item => item.status === 'pending');
 
-        for (const item of itemsToProcess) {
+        // Parallel processing using map and Promise.all
+        await Promise.all(itemsToProcess.map(async (item) => {
             // Update status to uploading
             setProgress(prev => prev.map(p =>
                 p.id === item.id ? { ...p, status: 'uploading' as const } : p
             ));
 
             try {
-                // Upload image to Supabase Storage
+                // Resize image if needed (Max 2048x2048, 0.8 quality)
+                const resizedBlob = await resizeImage(item.file, 2048, 2048, 0.8);
                 const fileExt = item.file.name.split('.').pop();
                 const fileName = `${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
 
                 const { data: uploadData, error: uploadError } = await supabase.storage
                     .from('images')
-                    .upload(fileName, item.file, { cacheControl: '3600', upsert: false });
+                    .upload(fileName, resizedBlob, { cacheControl: '3600', upsert: false, contentType: item.file.type });
 
                 if (uploadError) throw uploadError;
 
@@ -149,6 +150,7 @@ export default function UploadImagesPage() {
                 const dimensions = { width: img.width, height: img.height };
 
                 // Create image record
+                // NOTE: We use 'folder: currentFolder' here. API fix ensures it is saved.
                 const response = await fetch('/api/images', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -169,11 +171,6 @@ export default function UploadImagesPage() {
                 }
                 const imageRecord = await response.json();
 
-                // Refresh existing images
-                const imgsRes = await fetch(`/api/images?projectId=${currentProject.id}`);
-                setExistingImages(await imgsRes.json());
-
-                // ... rest of animation creation ...
                 // Update status to uploaded
                 setProgress(prev => prev.map(p =>
                     p.id === item.id ? { ...p, status: 'uploaded' as const, url: publicUrl } : p
@@ -198,21 +195,18 @@ export default function UploadImagesPage() {
 
                 if (animError) throw animError;
 
-                // Trigger generation
-                try {
-                    await fetch('/api/animations/generate', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            animation_id: animation.id,
-                            image_url: publicUrl,
-                            duration: duration,
-                        }),
-                    });
-                } catch (webhookError) {
-                    console.error('Webhook error:', webhookError);
-                }
+                // Trigger generation (Fire and Forget)
+                fetch('/api/animations/generate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        animation_id: animation.id,
+                        image_url: publicUrl,
+                        duration: duration,
+                    }),
+                }).catch(err => console.error('Webhook trigger error:', err));
 
+                // Immediately set to done (queued)
                 setProgress(prev => prev.map(p =>
                     p.id === item.id ? { ...p, status: 'done' as const, animationId: animation.id } : p
                 ));
@@ -225,9 +219,83 @@ export default function UploadImagesPage() {
             } finally {
                 URL.revokeObjectURL(item.preview);
             }
-        }
+        }));
+
         setUploading(false);
+        // Refresh existing images after batch
+        const imgsRes = await fetch(`/api/images?projectId=${currentProject.id}`);
+        setExistingImages(await imgsRes.json());
     };
+
+    const handleDelete = async (id: string) => {
+        if (!confirm('Are you sure you want to delete this image?')) return;
+        try {
+            const res = await fetch(`/api/images?id=${id}`, { method: 'DELETE' });
+            if (!res.ok) throw new Error('Failed to delete');
+            // Refresh
+            if (currentProject) {
+                const imgsRes = await fetch(`/api/images?projectId=${currentProject.id}`);
+                setExistingImages(await imgsRes.json());
+            }
+        } catch (err) {
+            alert('Failed to delete image');
+        }
+    };
+
+    // --- Drag & Drop Handlers ---
+    const handleDragStart = (e: React.DragEvent, id: string) => {
+        setDraggedImageId(id);
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', id);
+    };
+
+    const handleDragOver = (e: React.DragEvent, folderPath: string) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        setDragOverFolder(folderPath);
+    };
+
+    const handleDrop = async (e: React.DragEvent, targetFolder: string) => {
+        e.preventDefault();
+        setDragOverFolder(null);
+
+        // Check for file upload drop (if no draggedImageId)
+        if (!draggedImageId) {
+            const files = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('image/'));
+            if (files.length > 0) {
+                // Switch to target folder
+                setCurrentFolder(targetFolder);
+                // Queue files
+                handleFilesSelected(files);
+            }
+            return;
+        }
+
+        // Move existing item logic
+        try {
+            const res = await fetch('/api/images', {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    id: draggedImageId,
+                    project_id: currentProject?.id,
+                    folder: targetFolder
+                })
+            });
+
+            if (res.ok) {
+                const r = await fetch(`/api/images?projectId=${currentProject?.id}`);
+                setExistingImages(await r.json());
+            } else {
+                alert('Failed to move image');
+            }
+        } catch (err) {
+            console.error(err);
+        } finally {
+            setDraggedImageId(null);
+        }
+    };
+
 
     // ... render logic ...
     const visibleFolders = getSubfolders(existingImages, currentFolder);
@@ -250,15 +318,44 @@ export default function UploadImagesPage() {
                             <div className="flex items-center gap-1 bg-muted/20 px-3 py-1 rounded-full">
                                 <span className="text-sm">/</span>
                                 {currentFolder !== '/' && (
-                                    <button onClick={() => setCurrentFolder(currentFolder.split('/').slice(0, -1).join('/') || '/')} className="text-sm hover:underline">
+                                    <button
+                                        onClick={() => setCurrentFolder(currentFolder.split('/').slice(0, -1).join('/') || '/')}
+                                        onDragOver={(e) => handleDragOver(e, currentFolder.split('/').slice(0, -1).join('/') || '/')}
+                                        onDrop={(e) => handleDrop(e, currentFolder.split('/').slice(0, -1).join('/') || '/')}
+                                        className="text-sm hover:underline"
+                                    >
                                         ...
                                     </button>
                                 )}
                                 <span className="text-sm font-mono">{currentFolder}</span>
                             </div>
                             {currentFolder !== '/' && (
-                                <button onClick={() => setCurrentFolder(currentFolder.split('/').slice(0, -1).join('/') || '/')} className="text-sm border px-2 py-0.5 rounded hover:bg-muted">Up</button>
+                                <button
+                                    onClick={() => setCurrentFolder(currentFolder.split('/').slice(0, -1).join('/') || '/')}
+                                    onDragOver={(e) => handleDragOver(e, currentFolder.split('/').slice(0, -1).join('/') || '/')}
+                                    onDrop={(e) => handleDrop(e, currentFolder.split('/').slice(0, -1).join('/') || '/')}
+                                    className={`text-sm border px-2 py-0.5 rounded transition-all
+                                        ${dragOverFolder === (currentFolder.split('/').slice(0, -1).join('/') || '/') ? 'bg-primary text-white border-primary' : 'hover:bg-muted'}
+                                    `}
+                                >
+                                    Up
+                                </button>
                             )}
+                            <button
+                                onClick={async () => {
+                                    const name = prompt('New Folder:');
+                                    if (name) {
+                                        const newPath = currentFolder === '/' ? `/${name}` : `${currentFolder}/${name}`;
+                                        await fetch('/api/folders', { method: 'POST', body: JSON.stringify({ project_id: currentProject?.id, path: newPath }) });
+                                        const res = await fetch(`/api/folders?projectId=${currentProject?.id}`);
+                                        setProjectFolders(await res.json());
+                                        setCurrentFolder(newPath);
+                                    }
+                                }}
+                                className="ml-2 pt-1 pb-1 pl-3 pr-3 rounded-full bg-white/10 hover:bg-white/20 text-xs font-medium text-white transition-colors"
+                            >
+                                + New Folder
+                            </button>
                         </div>
                     )}
                 </div>
@@ -267,7 +364,10 @@ export default function UploadImagesPage() {
                 {!uploading ? (
                     <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
                         {/* ... */}
-                        <div className="flex justify-center">
+                        <div className="flex justify-center flex-col items-center gap-2">
+                            <div className="bg-white/5 px-4 py-1 rounded-full text-xs text-muted-foreground border border-white/10 mb-2">
+                                Uploading to: <span className="text-white font-mono font-medium">{currentFolder === '/' ? 'Root Folder' : currentFolder}</span>
+                            </div>
                             <AnimationDurationSelect
                                 value={duration}
                                 onChange={setDuration}
@@ -333,21 +433,45 @@ export default function UploadImagesPage() {
                         {/* Folders */}
                         {visibleFolders.map(folderPath => {
                             const folderName = folderPath.split('/').pop();
+                            // Calculate count
+                            const count = existingImages.filter(img => {
+                                const f = img.folder || '/';
+                                return f === folderPath || f.startsWith(folderPath + '/');
+                            }).length;
+
+                            const isDragOver = dragOverFolder === folderPath;
+
                             return (
                                 <div
                                     key={folderPath}
                                     onDoubleClick={() => setCurrentFolder(folderPath)}
-                                    className="aspect-square rounded-xl border-2 border-dashed border-border flex flex-col items-center justify-center gap-2 hover:border-primary/50 cursor-pointer"
+                                    // Drag Handlers
+                                    onDragOver={(e) => handleDragOver(e, folderPath)}
+                                    onDrop={(e) => handleDrop(e, folderPath)}
+                                    className={`aspect-square rounded-xl border-2 border-dashed flex flex-col items-center justify-center gap-2 cursor-pointer transition-all
+                                        ${isDragOver
+                                            ? 'border-primary bg-primary/10 scale-105 shadow-xl text-primary'
+                                            : 'border-border hover:border-primary/50 text-muted hover:text-foreground'
+                                        }
+                                    `}
                                 >
-                                    <span className="text-4xl">📂</span>
+                                    <Folder className={`w-12 h-12 ${isDragOver ? 'animate-bounce' : ''}`} />
                                     <span className="text-sm font-medium">{folderName}</span>
+                                    <span className="text-xs text-muted-foreground">{count} item{count !== 1 ? 's' : ''}</span>
                                 </div>
                             )
                         })}
 
                         {/* Images */}
                         {visibleImages.map((img, idx) => (
-                            <div key={img.id || idx} className="relative group aspect-square bg-card rounded-xl overflow-hidden border border-border">
+                            <div
+                                key={img.id || idx}
+                                draggable
+                                onDragStart={(e) => handleDragStart(e, img.id)}
+                                className={`relative group aspect-square bg-card rounded-xl overflow-hidden border transition-all
+                                    ${draggedImageId === img.id ? 'opacity-50 border-primary border-dashed' : 'border-border'}
+                                `}
+                            >
                                 <img
                                     src={img.url || '/placeholder.svg'}
                                     alt={img.filename || 'Image'}
@@ -364,6 +488,15 @@ export default function UploadImagesPage() {
                                             className="text-xs bg-white/20 hover:bg-white/40 text-white px-2 py-1 rounded backdrop-blur-sm transition-colors"
                                         >
                                             Move
+                                        </button>
+                                        <button
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                handleDelete(img.id);
+                                            }}
+                                            className="text-xs bg-red-500/20 hover:bg-red-500/40 text-red-200 hover:text-white px-2 py-1 rounded backdrop-blur-sm transition-colors ml-2 border border-red-500/20"
+                                        >
+                                            Delete
                                         </button>
                                     </div>
                                 </div>
@@ -402,3 +535,53 @@ export default function UploadImagesPage() {
         </div>
     );
 }
+
+// ... helper unchanged ...
+
+// Helper for client-side resizing
+const resizeImage = (file: File, maxWidth: number, maxHeight: number, quality: number): Promise<Blob> => {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.readAsDataURL(file);
+        reader.onload = (event) => {
+            const img = new Image();
+            img.src = event.target?.result as string;
+            img.onload = () => {
+                let width = img.width;
+                let height = img.height;
+
+                if (width > maxWidth || height > maxHeight) {
+                    if (width > height) {
+                        height = Math.round((height * maxWidth) / width);
+                        width = maxWidth;
+                    } else {
+                        width = Math.round((width * maxHeight) / height);
+                        height = maxHeight;
+                    }
+                } else {
+                    // Check if file is small enough to not need processed
+                    if (file.size < 1024 * 1024) { // < 1MB
+                        resolve(file);
+                        return;
+                    }
+                }
+
+                const canvas = document.createElement('canvas');
+                canvas.width = width;
+                canvas.height = height;
+                const ctx = canvas.getContext('2d');
+                if (!ctx) {
+                    resolve(file); // Fallback
+                    return;
+                }
+                ctx.drawImage(img, 0, 0, width, height);
+                canvas.toBlob((blob) => {
+                    if (blob) resolve(blob);
+                    else resolve(file);
+                }, file.type, quality);
+            };
+            img.onerror = (err) => reject(err);
+        };
+        reader.onerror = (err) => reject(err);
+    });
+};

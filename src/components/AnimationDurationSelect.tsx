@@ -13,7 +13,7 @@ export default function AnimationDurationSelect({ value, onChange }: AnimationDu
                 <button
                     onClick={() => onChange(5)}
                     className={`px-6 py-3 rounded-lg font-medium transition-all ${value === 5
-                        ? 'bg-primary text-white'
+                        ? 'bg-primary text-black'
                         : 'bg-card border border-border text-muted hover:border-primary'
                         }`}
                 >
@@ -22,7 +22,7 @@ export default function AnimationDurationSelect({ value, onChange }: AnimationDu
                 <button
                     onClick={() => onChange(10)}
                     className={`px-6 py-3 rounded-lg font-medium transition-all ${value === 10
-                        ? 'bg-primary text-white'
+                        ? 'bg-primary text-black'
                         : 'bg-card border border-border text-muted hover:border-primary'
                         }`}
                 >
