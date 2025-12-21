@@ -606,7 +606,10 @@ async function processJob(job) {
                         lastProgressUpdate = now;
                         console.log(`Progress: ${progress}%`);
                         supabase.from('video_jobs')
-                            .update({ progress: progress })
+                            .update({
+                                progress: progress,
+                                updated_at: new Date().toISOString()
+                            })
                             .eq('id', jobId)
                             .then(({ error }) => {
                                 if (error) console.error('Failed to update progress:', error.message);
@@ -711,11 +714,11 @@ async function startWorker() {
                     // We successfully claimed it!
                     const job = claimed[0];
 
-                    // SAFETY TIMEOUT: If a single job takes > 20 minutes, kill process so supervisor restarts it
+                    // SAFETY TIMEOUT: If a single job takes > 120 minutes, kill process so supervisor restarts it
                     const timeout = setTimeout(() => {
-                        console.error('❌ CRITICAL: Job timed out (>20m). Exiting to force restart...');
+                        console.error('❌ CRITICAL: Job timed out (>120m). Exiting to force restart...');
                         process.exit(1);
-                    }, 20 * 60 * 1000);
+                    }, 120 * 60 * 1000);
 
                     try {
                         await processJob(job);

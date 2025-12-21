@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 import { ProjectProvider } from "@/context/ProjectContext";
 import Navigation from "@/components/Navigation";
+import { Footer } from "@/components/Footer";
 
 /*
 const geistSans = Geist({
@@ -37,6 +38,7 @@ export default function RootLayout({
           <main className="min-h-screen pt-20 pb-10 px-4 max-w-7xl mx-auto">
             {children}
           </main>
+          <Footer />
         </ProjectProvider>
       </body>
     </html>
