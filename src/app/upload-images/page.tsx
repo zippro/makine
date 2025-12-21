@@ -335,7 +335,7 @@ export default function UploadImagesPage() {
                                     onDragOver={(e) => handleDragOver(e, currentFolder.split('/').slice(0, -1).join('/') || '/')}
                                     onDrop={(e) => handleDrop(e, currentFolder.split('/').slice(0, -1).join('/') || '/')}
                                     className={`text-sm border px-2 py-0.5 rounded transition-all
-                                        ${dragOverFolder === (currentFolder.split('/').slice(0, -1).join('/') || '/') ? 'bg-primary text-white border-primary' : 'hover:bg-muted'}
+                                        ${dragOverFolder === (currentFolder.split('/').slice(0, -1).join('/') || '/') ? 'bg-primary text-black border-primary' : 'hover:bg-muted'}
                                     `}
                                 >
                                     Up

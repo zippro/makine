@@ -128,7 +128,7 @@ export default function JobDetailPage() {
                             <a
                                 href={job.video_url}
                                 download={`${job.title_text}.mp4`}
-                                className="flex items-center gap-2 px-3 py-2 rounded-lg bg-primary text-white hover:bg-primary-hover transition-colors text-sm"
+                                className="flex items-center gap-2 px-3 py-2 rounded-lg bg-primary text-black hover:bg-primary-hover transition-colors text-sm"
                             >
                                 <Download className="w-4 h-4" />
                                 Download
@@ -190,7 +190,7 @@ export default function JobDetailPage() {
                         />
 
                         {/* Preview of source files */}
-                /* Preview of source files */
+                        {/* Preview of source files */}
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                             <div className="p-4 rounded-xl bg-card border border-border">
                                 <p className="text-sm text-muted mb-3">Source Image</p>

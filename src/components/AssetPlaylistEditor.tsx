@@ -203,7 +203,7 @@ export function AssetPlaylistEditor({ project, onUpdate, onAddAnimation }: Asset
                         placeholder="https://..."
                         className="flex-1 text-sm bg-background border border-border rounded px-2 py-1"
                     />
-                    <button onClick={handleUrlAdd} className="bg-primary text-white text-xs px-3 py-1 rounded">Add</button>
+                    <button onClick={handleUrlAdd} className="bg-primary text-black text-xs px-3 py-1 rounded">Add</button>
                 </div>
             )}
 

@@ -651,7 +651,7 @@ export default function Home() {
                         {/* Selected Checkmark Overlay */}
                         {isSelected && (
                           <div className="absolute inset-0 bg-primary/20 backdrop-blur-[1px] flex items-center justify-center">
-                            <div className="bg-primary text-white p-2 rounded-full shadow-lg scale-100 animate-in fade-in zoom-in duration-200">
+                            <div className="bg-primary text-black p-2 rounded-full shadow-lg scale-100 animate-in fade-in zoom-in duration-200">
                               <Check className="w-6 h-6" />
                             </div>
                           </div>
@@ -766,7 +766,7 @@ export default function Home() {
             <div className="p-4 border-t border-border">
               <button
                 onClick={() => setShowMusicPicker(false)}
-                className="w-full bg-primary text-white py-2 rounded-lg font-medium hover:bg-primary/90 transition-colors"
+                className="w-full bg-primary text-black py-2 rounded-lg font-medium hover:bg-primary/90 transition-colors"
               >
                 Done
               </button>

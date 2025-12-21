@@ -465,7 +465,7 @@ export default function MusicLibraryPage() {
                                         }
                                     `}
                                 >
-                                    <div className={`p-3 rounded-full ${isDragOver ? 'bg-primary text-white' : 'bg-primary/10 text-primary'}`}>
+                                    <div className={`p-3 rounded-full ${isDragOver ? 'bg-primary text-black' : 'bg-primary/10 text-primary'}`}>
                                         {isDragOver ? <FolderOpen className="w-5 h-5 animate-pulse" /> : <Folder className="w-5 h-5" />}
                                     </div>
                                     <div className="flex-1">

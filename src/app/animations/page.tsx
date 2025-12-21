@@ -429,7 +429,7 @@ export default function AnimationsPage() {
                                         }
                                     `}
                                 >
-                                    <div className={`p-4 rounded-full transition-all duration-300 ${isDragOver ? 'bg-primary text-white' : 'bg-white/5 text-gray-400 group-hover:scale-110 group-hover:bg-white/10 group-hover:text-white'}`}>
+                                    <div className={`p-4 rounded-full transition-all duration-300 ${isDragOver ? 'bg-primary text-black' : 'bg-white/5 text-gray-400 group-hover:scale-110 group-hover:bg-white/10 group-hover:text-white'}`}>
                                         {isDragOver ? <FolderOpen className="w-8 h-8 animate-bounce" /> : <ChevronDown className="w-8 h-8" />}
                                     </div>
                                     <div className="text-center">
