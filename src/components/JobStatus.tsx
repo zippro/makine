@@ -155,7 +155,7 @@ export function JobStatus({ jobId, initialStatus = 'queued', onComplete }: JobSt
     };
 
     const config = statusConfig[status];
-    const isStalled = elapsedSeconds > 900; // 15 minutes (User requested to hide this warning)
+    const isStalled = elapsedSeconds > 1800; // 30 minutes (User requested to hide this warning)
 
     return (
         <div className="p-6 rounded-xl bg-card border border-border">
