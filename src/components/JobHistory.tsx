@@ -6,7 +6,7 @@ import { Clock, Play, RefreshCw, Trash2, Youtube } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { JobStatusBadge } from './JobStatus';
 import type { VideoJob } from '@/lib/types';
-import { YouTubePublishModal } from './YouTubePublishModal';
+import YouTubePublishModal from './YouTubePublishModal';
 import { useProject } from '@/context/ProjectContext';
 
 interface JobHistoryProps {
