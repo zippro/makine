@@ -60,6 +60,8 @@ export function ProjectConfigModal({ project, isOpen, onClose, onUpdate }: Proje
     const [clientId, setClientId] = useState("");
     const [clientSecret, setClientSecret] = useState("");
     const [refreshToken, setRefreshToken] = useState("");
+    const [channelInfo, setChannelInfo] = useState("");
+    const [keywords, setKeywords] = useState("");
 
     // Config State
     const [videoMode, setVideoMode] = useState<string>("simple_animation");
@@ -91,6 +93,10 @@ export function ProjectConfigModal({ project, isOpen, onClose, onUpdate }: Proje
                 setClientSecret(project.youtube_creds.client_secret || "");
                 setRefreshToken(project.youtube_creds.refresh_token || "");
             }
+            // Metadata
+            setChannelInfo((project as any).channel_info || "");
+            setKeywords((project as any).keywords || "");
+
             // Settings (Fallbacks handled)
             setVideoMode((project as any).video_mode || "simple_animation");
             setTemplateAssets((project as any).template_assets || []);
@@ -126,7 +132,9 @@ export function ProjectConfigModal({ project, isOpen, onClose, onUpdate }: Proje
                 template_assets: templateAssets,
                 overlay_config: overlayConfig,
                 visualizer_config: visualizerConfig,
-                default_loop_count: defaultLoopCount
+                default_loop_count: defaultLoopCount,
+                channel_info: channelInfo,
+                keywords: keywords
             };
 
             // Only update credentials if inputs are touched/valid
@@ -275,6 +283,29 @@ export function ProjectConfigModal({ project, isOpen, onClose, onUpdate }: Proje
                         {/* GENERAL TAB */}
                         {activeTab === 'general' && (
                             <div className="space-y-6 max-w-xl">
+                                <h3 className="text-lg font-semibold border-b border-border pb-2">channel & Content (AI)</h3>
+                                <div className="space-y-4 mb-8">
+                                    <div>
+                                        <label className="text-sm font-medium block mb-1.5">Channel Info / Style</label>
+                                        <textarea
+                                            value={channelInfo}
+                                            onChange={(e) => setChannelInfo(e.target.value)}
+                                            className="w-full bg-card border border-border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/20 outline-none h-24 resize-none"
+                                            placeholder="Describe your channel style, tone, and typical content (e.g. 'Chill Lofi Beats, relaxing atmosphere'). Used for AI generation."
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="text-sm font-medium block mb-1.5">Default Keywords</label>
+                                        <input
+                                            type="text"
+                                            value={keywords}
+                                            onChange={(e) => setKeywords(e.target.value)}
+                                            className="w-full bg-card border border-border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/20 outline-none"
+                                            placeholder="Comma separated keywords (e.g. music, lofi, study)"
+                                        />
+                                    </div>
+                                </div>
+
                                 <h3 className="text-lg font-semibold border-b border-border pb-2">YouTube Credentials</h3>
                                 <div className="space-y-4">
                                     {/* Existing Credentials */}

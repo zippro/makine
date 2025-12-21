@@ -54,7 +54,8 @@ export function YouTubePublishModal({ job, isOpen, onClose, onPublish, channelIn
                 body: JSON.stringify({
                     image_url: job.thumbnail_url || job.image_url,
                     channel_info: channelInfo,
-                    keywords: keywords
+                    keywords: keywords,
+                    video_title: title // Pass the current title if available
                 })
             });
 

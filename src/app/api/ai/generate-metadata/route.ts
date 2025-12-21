@@ -10,7 +10,7 @@ export async function POST(request: NextRequest) {
     });
 
     try {
-        const { image_url, channel_info, keywords } = await request.json();
+        const { image_url, channel_info, keywords, video_title } = await request.json();
 
         if (!image_url) {
             return NextResponse.json({ error: 'Image URL is required' }, { status: 400 });
@@ -19,9 +19,10 @@ export async function POST(request: NextRequest) {
         const prompt = `
         You are a YouTube Growth Expert and SEO Specialist.
         
-        Task: Generate metadata for a YouTube video based on the provided image, channel information, and keywords.
+        Task: Generate metadata for a YouTube video based on the provided image and context.
         
         Context:
+        - Video Title/Topic: ${video_title || 'Unknown'}
         - Channel Info: ${channel_info || 'General Music Channel'}
         - Target Keywords: ${keywords || 'Music, Video, Visualizer'}
         

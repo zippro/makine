@@ -47,7 +47,7 @@ export default function PublishPage() {
                     {/* Ready to Publish */}
                     <div className="space-y-4">
                         <h3 className="text-lg font-semibold flex items-center gap-2 text-foreground/80">
-                            <Clock className="w-5 h-5 text-blue-500" /> Ready to Schedule
+                            <Clock className="w-5 h-5 text-blue-500" /> Ready to Schedule ({readyJobs.length})
                         </h3>
                         <div className="space-y-4 bg-muted/10 p-4 rounded-xl min-h-[500px]">
                             {readyJobs.length === 0 && <p className="text-muted text-sm text-center py-10">No videos ready.</p>}
@@ -60,7 +60,7 @@ export default function PublishPage() {
                     {/* Scheduled */}
                     <div className="space-y-4">
                         <h3 className="text-lg font-semibold flex items-center gap-2 text-foreground/80">
-                            <Calendar className="w-5 h-5 text-yellow-500" /> Scheduled
+                            <Calendar className="w-5 h-5 text-yellow-500" /> Scheduled ({scheduledJobs.length})
                         </h3>
                         <div className="space-y-4 bg-muted/10 p-4 rounded-xl min-h-[500px]">
                             {scheduledJobs.length === 0 && <p className="text-muted text-sm text-center py-10">No videos scheduled.</p>}
@@ -73,7 +73,7 @@ export default function PublishPage() {
                     {/* Published */}
                     <div className="space-y-4">
                         <h3 className="text-lg font-semibold flex items-center gap-2 text-foreground/80">
-                            <Youtube className="w-5 h-5 text-red-600" /> Published
+                            <Youtube className="w-5 h-5 text-red-600" /> Published ({publishedJobs.length})
                         </h3>
                         <div className="space-y-4 bg-muted/10 p-4 rounded-xl min-h-[500px]">
                             {publishedJobs.length === 0 && <p className="text-muted text-sm text-center py-10">No videos published.</p>}
