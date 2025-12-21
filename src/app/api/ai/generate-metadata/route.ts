@@ -1,14 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import OpenAI from 'openai';
 
-// Initialize OpenAI client
-const openai = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY,
-});
-
 export const maxDuration = 60; // Allow longer generation time
 
 export async function POST(request: NextRequest) {
+    // Initialize OpenAI client inside handler to avoid build-time errors if env var is missing
+    const openai = new OpenAI({
+        apiKey: process.env.OPENAI_API_KEY,
+    });
+
     try {
         const { image_url, channel_info, keywords } = await request.json();
 

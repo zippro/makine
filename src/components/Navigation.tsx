@@ -159,6 +159,18 @@ export default function Navigation() {
                             <History className="h-4 w-4" />
                             <span className="hidden sm:inline">History</span>
                         </Link>
+
+                        <div className="h-4 w-px bg-border mx-1" />
+
+                        <Link
+                            href="/publish"
+                            className={`flex items-center gap-1.5 rounded-lg px-2 sm:px-3 py-2 text-sm transition-colors ${isActive("/publish")
+                                ? "bg-primary/10 text-primary font-medium"
+                                : "text-muted hover:text-foreground hover:bg-card"
+                                }`}
+                        >
+                            <span className="hidden sm:inline">Publish</span>
+                        </Link>
                     </div>
                 </div>
             </div>

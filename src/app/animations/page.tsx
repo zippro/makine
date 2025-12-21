@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { Check, Trash2, Loader2, Video, AlertCircle, ChevronDown, ChevronUp, Play, X } from 'lucide-react';
 import { useProject } from '@/context/ProjectContext';
 import { VideoDetailsModal } from '@/components/VideoDetailsModal';
+import { MoveAssetModal } from '@/components/MoveAssetModal';
 
 interface Animation {
     id: string;
@@ -37,9 +38,10 @@ export default function AnimationsPage() {
     const [editingId, setEditingId] = useState<string | null>(null);
     const [updatingId, setUpdatingId] = useState<string | null>(null);
 
-    // AI Details Modal State
+    // Modal State
     const [detailsModalOpen, setDetailsModalOpen] = useState(false);
     const [selectedVideoForDetails, setSelectedVideoForDetails] = useState<any>(null);
+    const [moveModalState, setMoveModalState] = useState<{ isOpen: boolean; itemId: string | null }>({ isOpen: false, itemId: null });
 
     // Edit state
     const [editTrimStart, setEditTrimStart] = useState(0);
@@ -409,21 +411,6 @@ export default function AnimationsPage() {
                                             <span className="text-xs text-primary">
                                                 Used in {animation.video_usage_count} video{animation.video_usage_count !== 1 ? 's' : ''}
                                             </span>
-                                        {animation.video_usage_count > 0 && (
-                                            <span className="text-xs text-primary">
-                                                Used in {animation.video_usage_count} video{animation.video_usage_count !== 1 ? 's' : ''}
-                                            </span>
-                                        )}
-                                        {animation.status === 'done' && (
-                                            <button
-                                                onClick={() => {
-                                                    setSelectedVideoForDetails(animation); // In real app, this might be a video_job, but adapting for now
-                                                    setDetailsModalOpen(true);
-                                                }}
-                                                className="text-xs bg-purple-500/10 hover:bg-purple-500/20 text-purple-500 px-2 py-1 rounded transition-colors ml-auto"
-                                            >
-                                                AI Details
-                                            </button>
                                         )}
                                     </div>
 
@@ -512,6 +499,13 @@ export default function AnimationsPage() {
                                                 </button>
                                             )}
                                             <button
+                                                onClick={() => setMoveModalState({ isOpen: true, itemId: animation.id })}
+                                                className="py-2 px-3 rounded-lg bg-muted text-foreground text-sm hover:bg-muted/80 transition-all font-medium"
+                                                title="Move to Folder"
+                                            >
+                                                Move
+                                            </button>
+                                            <button
                                                 onClick={() => handleDelete(animation.id)}
                                                 disabled={updatingId === animation.id}
                                                 className="py-2 px-3 rounded-lg bg-error/20 text-error text-sm hover:bg-error hover:text-white transition-all disabled:opacity-50"
@@ -565,6 +559,37 @@ export default function AnimationsPage() {
                 onUpdate={(updated) => {
                     // Update local list if needed
                     fetchAnimations();
+                }}
+            />
+
+            <MoveAssetModal
+                isOpen={moveModalState.isOpen}
+                onClose={() => setMoveModalState({ isOpen: false, itemId: null })}
+                currentFolder={currentFolder}
+                assetType="animation"
+                onMove={async (targetFolder) => {
+                    if (moveModalState.itemId) {
+                        try {
+                            const res = await fetch('/api/animations', {
+                                method: 'PATCH',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                    id: moveModalState.itemId,
+                                    folder: targetFolder
+                                })
+                            });
+
+                            if (res.ok) {
+                                await fetchAnimations();
+                            } else {
+                                const data = await res.json();
+                                alert(data.error || 'Failed to move animation');
+                            }
+                        } catch (err) {
+                            console.error('Failed to move animation', err);
+                            alert('Failed to move animation');
+                        }
+                    }
                 }}
             />
         </div>

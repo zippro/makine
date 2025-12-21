@@ -309,31 +309,6 @@ export function ProjectConfigModal({ project, isOpen, onClose, onUpdate }: Proje
                                         />
                                     </div>
                                 </div>
-
-                                <h3 className="text-lg font-semibold border-b border-border pb-2 pt-4">Channel & Content (AI)</h3>
-                                <div className="space-y-4">
-                                    <div>
-                                        <label className="text-sm font-medium block mb-1.5">Channel Info / Style</label>
-                                        <textarea
-                                            value={(project as any).channel_info || ""}
-                                            onChange={(e) => onUpdate({ ...project, channel_info: e.target.value })}
-                                            className="w-full bg-card border border-border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/20 outline-none min-h-[100px]"
-                                            placeholder="Describe your channel style, target audience, and tone (e.g. 'Chill beats for studying, relaxing visuals, lo-fi aesthetic'). This helps AI generate better descriptions."
-                                        />
-                                        <p className="text-xs text-muted mt-1">Used by AI to match your channel's voice.</p>
-                                    </div>
-                                    <div>
-                                        <label className="text-sm font-medium block mb-1.5">Default Keywords / Tags</label>
-                                        <input
-                                            type="text"
-                                            value={(project as any).keywords || ""}
-                                            onChange={(e) => onUpdate({ ...project, keywords: e.target.value })}
-                                            className="w-full bg-card border border-border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/20 outline-none"
-                                            placeholder="e.g. lofi, study, relax, beats (comma separated)"
-                                        />
-                                        <p className="text-xs text-muted mt-1">Core keywords to include in every video.</p>
-                                    </div>
-                                </div>
                             </div>
                         )}
 

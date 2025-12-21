@@ -1,9 +1,10 @@
 'use client';
 
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { Upload, Music, Loader2, Trash2, Play, Pause, Clock } from 'lucide-react';
+import { Upload, Music, Loader2, Trash2, Play, Pause, Clock, Folder } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { useProject } from '@/context/ProjectContext';
+import { MoveAssetModal } from '@/components/MoveAssetModal';
 
 interface MusicTrack {
     id: string;
@@ -22,6 +23,7 @@ export default function MusicLibraryPage() {
     const [error, setError] = useState<string | null>(null);
     const [playingId, setPlayingId] = useState<string | null>(null);
     const [deletingId, setDeletingId] = useState<string | null>(null);
+    const [moveModalState, setMoveModalState] = useState<{ isOpen: boolean; itemId: string | null }>({ isOpen: false, itemId: null });
     const audioRef = useRef<HTMLAudioElement | null>(null);
 
     // Folder State
@@ -442,14 +444,7 @@ export default function MusicLibraryPage() {
                                         )}
                                         {/* Move Button */}
                                         <button
-                                            onClick={() => {
-                                                const newFolder = prompt('Move to folder (e.g. /Pop):', currentFolder);
-                                                if (newFolder && newFolder !== currentFolder) {
-                                                    // Ensure leading slash
-                                                    const cleanFolder = newFolder.startsWith('/') ? newFolder : `/${newFolder}`;
-                                                    handleMove(track.id, cleanFolder);
-                                                }
-                                            }}
+                                            onClick={() => setMoveModalState({ isOpen: true, itemId: track.id })}
                                             className="text-xs bg-muted/50 hover:bg-muted px-2 py-1 rounded transition-colors"
                                         >
                                             Move
@@ -479,6 +474,18 @@ export default function MusicLibraryPage() {
                     </div>
                 )}
             </div>
+
+            <MoveAssetModal
+                isOpen={moveModalState.isOpen}
+                onClose={() => setMoveModalState({ isOpen: false, itemId: null })}
+                currentFolder={currentFolder}
+                assetType="music"
+                onMove={async (targetFolder) => {
+                    if (moveModalState.itemId) {
+                        await handleMove(moveModalState.itemId, targetFolder);
+                    }
+                }}
+            />
         </div>
     );
 }

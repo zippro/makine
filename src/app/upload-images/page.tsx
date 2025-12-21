@@ -6,6 +6,8 @@ import ImageUploader from '@/components/ImageUploader';
 import AnimationDurationSelect from '@/components/AnimationDurationSelect';
 import UploadProgress, { UploadStatus } from '@/components/UploadProgress';
 import { useProject } from '@/context/ProjectContext';
+import { MoveAssetModal } from '@/components/MoveAssetModal';
+import { Folder } from 'lucide-react';
 
 export default function UploadImagesPage() {
     const { currentProject } = useProject();
@@ -16,6 +18,7 @@ export default function UploadImagesPage() {
     const [existingImages, setExistingImages] = useState<any[]>([]);
     const [currentFolder, setCurrentFolder] = useState<string>('/');
     const [projectFolders, setProjectFolders] = useState<any[]>([]);
+    const [moveModalState, setMoveModalState] = useState<{ isOpen: boolean; itemId: string | null }>({ isOpen: false, itemId: null });
 
     useEffect(() => {
         if (currentProject) {
@@ -356,27 +359,7 @@ export default function UploadImagesPage() {
                                         <button
                                             onClick={(e) => {
                                                 e.stopPropagation();
-                                                const newFolder = prompt('Move to folder (e.g. /Pop/Hits):', img.folder || '/');
-                                                if (newFolder !== null && newFolder !== img.folder) {
-                                                    // Move logic
-                                                    fetch('/api/images', {
-                                                        method: 'PATCH',
-                                                        headers: { 'Content-Type': 'application/json' },
-                                                        body: JSON.stringify({
-                                                            id: img.id,
-                                                            project_id: currentProject?.id,
-                                                            folder: newFolder.startsWith('/') ? newFolder : `/${newFolder}`
-                                                        })
-                                                    }).then(async res => {
-                                                        if (res.ok) {
-                                                            // Refresh
-                                                            const r = await fetch(`/api/images?projectId=${currentProject?.id}`);
-                                                            setExistingImages(await r.json());
-                                                        } else {
-                                                            alert('Failed to move image');
-                                                        }
-                                                    });
-                                                }
+                                                setMoveModalState({ isOpen: true, itemId: img.id });
                                             }}
                                             className="text-xs bg-white/20 hover:bg-white/40 text-white px-2 py-1 rounded backdrop-blur-sm transition-colors"
                                         >
@@ -389,6 +372,33 @@ export default function UploadImagesPage() {
                     </div>
                 </div>
             )}
+
+            <MoveAssetModal
+                isOpen={moveModalState.isOpen}
+                onClose={() => setMoveModalState({ isOpen: false, itemId: null })}
+                currentFolder={currentFolder}
+                assetType="image"
+                onMove={async (targetFolder) => {
+                    if (moveModalState.itemId && currentProject) {
+                        const res = await fetch('/api/images', {
+                            method: 'PATCH',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                id: moveModalState.itemId,
+                                project_id: currentProject.id,
+                                folder: targetFolder
+                            })
+                        });
+
+                        if (res.ok) {
+                            const r = await fetch(`/api/images?projectId=${currentProject.id}`);
+                            setExistingImages(await r.json());
+                        } else {
+                            alert('Failed to move image');
+                        }
+                    }
+                }}
+            />
         </div>
     );
 }

@@ -10,6 +10,8 @@ interface YouTubePublishModalProps {
     isOpen: boolean;
     onClose: () => void;
     onPublish: (metadata: YouTubeMetadata) => Promise<void>;
+    channelInfo?: string;
+    keywords?: string;
 }
 
 export interface YouTubeMetadata {
@@ -20,7 +22,7 @@ export interface YouTubeMetadata {
     publishAt?: string; // ISO string
 }
 
-export function YouTubePublishModal({ job, isOpen, onClose, onPublish }: YouTubePublishModalProps) {
+export function YouTubePublishModal({ job, isOpen, onClose, onPublish, channelInfo, keywords }: YouTubePublishModalProps) {
     const [title, setTitle] = useState(job.title_text || "");
     const [description, setDescription] = useState(`Created with Makine Video AI\nProject: ${job.project_id}\n\n#shorts`);
     const [tags, setTags] = useState("music,video,ai,generated");
@@ -29,6 +31,7 @@ export function YouTubePublishModal({ job, isOpen, onClose, onPublish }: YouTube
     const [scheduleDate, setScheduleDate] = useState("");
     const [scheduleTime, setScheduleTime] = useState("");
     const [isLoading, setIsLoading] = useState(false);
+    const [isGeneratingAI, setIsGeneratingAI] = useState(false);
     const [error, setError] = useState("");
 
     // Reset form when opening different job
@@ -40,6 +43,34 @@ export function YouTubePublishModal({ job, isOpen, onClose, onPublish }: YouTube
             setError("");
         }
     }, [isOpen, job]);
+
+    const handleGenerateAI = async () => {
+        setIsGeneratingAI(true);
+        setError("");
+        try {
+            const res = await fetch("/api/ai/generate-metadata", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    image_url: job.thumbnail_url || job.image_url,
+                    channel_info: channelInfo,
+                    keywords: keywords
+                })
+            });
+
+            if (!res.ok) throw new Error("AI Generation Failed");
+
+            const data = await res.json();
+            setTitle(data.title);
+            setDescription(data.description);
+            setTags(data.tags);
+        } catch (err: any) {
+            console.error(err);
+            setError(err.message || "Failed to generate metadata");
+        } finally {
+            setIsGeneratingAI(false);
+        }
+    };
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -94,6 +125,27 @@ export function YouTubePublishModal({ job, isOpen, onClose, onPublish }: YouTube
                     <button onClick={onClose} className="p-2 hover:bg-muted rounded-full transition-colors">
                         <X className="w-5 h-5" />
                     </button>
+                </div>
+
+                <div className="px-6 pt-4">
+                    <button
+                        type="button"
+                        onClick={handleGenerateAI}
+                        disabled={isGeneratingAI}
+                        className="w-full py-3 bg-purple-600 hover:bg-purple-700 text-white rounded-xl font-medium flex items-center justify-center gap-2 transition-all disabled:opacity-50"
+                    >
+                        {isGeneratingAI ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <span className="flex items-center gap-2">Generating...</span>
+                        ) : (
+                            <>
+                                <span className="text-lg">✨</span> Generate Metadata with AI
+                            </>
+                        )}
+                    </button>
+                    <p className="text-xs text-muted text-center mt-2">
+                        Uses your project's Channel Info & Keywords to generate SEO-optimized content.
+                    </p>
                 </div>
 
                 <form onSubmit={handleSubmit} className="p-6 space-y-6">

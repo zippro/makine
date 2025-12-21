@@ -326,6 +326,8 @@ export function JobHistory({ limit }: JobHistoryProps) {
                     job={publishingJob}
                     isOpen={!!publishingJob}
                     onClose={() => setPublishingJob(null)}
+                    channelInfo={currentProject?.channel_info} // Pass Project Context
+                    keywords={currentProject?.keywords} // Pass Project Context
                     onPublish={async (metadata) => {
                         try {
                             const res = await fetch(`/api/jobs/${publishingJob.id}/publish`, {
