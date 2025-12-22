@@ -743,6 +743,9 @@ async function processJob(job) {
 
                     const progress = Math.min(100, Math.round((currentTime / totalDuration) * 100));
 
+                    // DEBUG PROGRESS
+                    console.log(`[Progress Debug] Time: ${currentTime.toFixed(2)} / Total: ${totalDuration} | Progress: ${progress}%`);
+
                     // Update progress in DB (throttle every 2s)
                     const now = Date.now();
                     if (now - lastProgressUpdate > 2000 && progress > 0) {
