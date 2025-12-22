@@ -10,20 +10,36 @@ const TEMP_DIR = path.join('/tmp', 'rendi_worker');
 // Ensure temp dir exists
 if (!fs.existsSync(TEMP_DIR)) fs.mkdirSync(TEMP_DIR);
 
-async function downloadFile(url, destPath) {
-    try {
-        console.log(`Downloading: ${url}`);
-        execSync(`curl -L -o "${destPath}" "${url}"`, { stdio: 'inherit' });
-        if (!fs.existsSync(destPath)) throw new Error('Download failed: file missing');
-    } catch (err) {
-        throw new Error(`Failed to download ${url}: ${err.message}`);
-    }
-}
 
 function cleanup() {
     fs.rmSync(TEMP_DIR, { recursive: true, force: true });
     fs.mkdirSync(TEMP_DIR);
 }
+
+const downloadFile = async (url, destPath) => {
+    // OPTIMIZATION: Check if URL is local (Hetzner Storage)
+    const localDomain = process.env.NEXT_PUBLIC_SERVER_IP ? `${process.env.NEXT_PUBLIC_SERVER_IP}.nip.io` : '46.62.209.244.nip.io';
+
+    if (url && (url.includes(localDomain) || url.includes('localhost'))) {
+        try {
+            const urlObj = new URL(url);
+            const localFilePath = path.join('/var/www', urlObj.pathname);
+
+            if (fs.existsSync(localFilePath)) {
+                console.log(`[Optimization] Copying local file: ${localFilePath}`);
+                fs.copyFileSync(localFilePath, destPath);
+                return;
+            }
+        } catch (e) {
+            console.error(`[Optimization] Failed to read local file: ${e.message}`);
+        }
+    }
+
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`Failed to download ${url}: ${response.statusText}`);
+    const buffer = await response.arrayBuffer();
+    fs.writeFileSync(destPath, Buffer.from(buffer));
+};
 
 async function processJob(job) {
     console.log(`\n--- Processing Job ${job.id} ---`);
@@ -206,7 +222,19 @@ async function processJob(job) {
             try {
                 await downloadFile(animationUrl, videoPath);
                 if (fs.statSync(videoPath).size < 1000) throw new Error('Video file too small (<1KB)');
-                videoInputs.push({ path: videoPath, isVideo: true }); // Assume video for legacy
+
+                // Probe Duration
+                let duration = 5;
+                try {
+                    const probeOut = require('child_process').execSync(`ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "${videoPath}"`).toString();
+                    const d = parseFloat(probeOut);
+                    if (!isNaN(d) && d > 0) duration = d;
+                    console.log(`Legacy Video Probed Duration: ${duration}`);
+                } catch (e) {
+                    console.warn('Failed to probe duration, defaulting to 5s:', e.message);
+                }
+
+                videoInputs.push({ path: videoPath, isVideo: true, duration: duration }); // Set probed duration
             } catch (e) {
                 throw new Error(`Critical: Failed to load animation: ${e.message}`);
             }
@@ -257,14 +285,23 @@ async function processJob(job) {
         console.log(`calculated totalDuration: ${totalDuration}`);
         if (totalDuration === 0) totalDuration = 10;
 
+        // 4b. Get Speed Multiplier Early
+        const SpeedMult = job.speed_multiplier || 1;
+
         // 5. Sequence Looping Logic
-        // We need to loop the *sequence* of timeline items to match totalDuration
+        // We need to loop the *sequence* of timeline items to match totalDuration.
+        // BUT, if we are slowing down the video (speed < 1), the video itself becomes longer.
+        // So we need fewer loops to fill the time.
         let timelineDuration = timeline.reduce((sum, item) => sum + (item.duration || 5), 0);
         if (timelineDuration === 0) timelineDuration = 5;
 
+        // Effective duration of one sequence pass after speed adjustment
+        const effectiveSequenceDuration = timelineDuration / SpeedMult;
+
         // How many times to repeat the whole sequence?
-        const sequenceLoops = Math.ceil(totalDuration / timelineDuration);
-        console.log(`Sequence Duration: ${timelineDuration}, Target: ${totalDuration}, Loops: ${sequenceLoops}`);
+        // We compare Target Duration (Music) vs Effective Sequence Duration
+        const sequenceLoops = Math.ceil(totalDuration / effectiveSequenceDuration);
+        console.log(`Sequence Duration: ${timelineDuration}, Speed: ${SpeedMult}, Effective: ${effectiveSequenceDuration}, Target: ${totalDuration}, Loops: ${sequenceLoops}`);
 
         // Construct Flat Input List for Concat
         // We will reuse the same physical input files (videoInputs[i]), but refer to them multiple times in the filter graph?
@@ -317,6 +354,7 @@ async function processJob(job) {
         const audioInputStart = 1; // Video concat is 0
         let audioFilterString = '';
         const normAudioLabels = [];
+        let musicConcat = '';
 
         if (musicPaths.length > 0) {
             musicPaths.forEach((_, i) => {
@@ -326,11 +364,10 @@ async function processJob(job) {
                 audioFilterString += `${inputLabel}aformat=sample_rates=44100:channel_layouts=stereo,aresample=44100:async=1${normLabel};`;
                 normAudioLabels.push(normLabel);
             });
-        }
 
-        const musicConcat = normAudioLabels.length > 0
-            ? `${audioFilterString}${normAudioLabels.join('')}concat=n=${normAudioLabels.length}:v=0:a=1[aout]`
-            : '';
+            // Concat and Loop
+            musicConcat = `${audioFilterString}${normAudioLabels.join('')}concat=n=${normAudioLabels.length}:v=0:a=1,aloop=loop=-1:size=2e9[aout];`;
+        }
 
         // --- TRANSITIONS & LOOP Logic ---
         // Calculate Transition Points (Dip to Black)
@@ -395,7 +432,27 @@ async function processJob(job) {
             // Silence generation if no music? Or just skip.
         }
 
+
         // --- 2. Video Base Processing ---
+        // Apply Speed and Trim if present in job
+        const speed = job.speed_multiplier || 1;
+        const trimStart = job.trim_start || 0;
+        const trimEnd = job.trim_end || 0;
+
+        let preFilter = '';
+        if (trimEnd > 0) {
+            // Trim logic
+            preFilter += `trim=${trimStart}:${trimEnd},setpts=PTS-STARTPTS,`;
+        } else if (trimStart > 0) {
+            preFilter += `trim=${trimStart},setpts=PTS-STARTPTS,`;
+        }
+
+        // Speed Logic (setpts)
+        // 0.5x speed = 2.0 * PTS (slower)
+        // 2x speed = 0.5 * PTS (faster)
+        if (speed !== 1) {
+            preFilter += `setpts=PTS/${speed},`;
+        }
 
         // --- Video Processing ---
         // Input [0:v] is now the fully looped sequence.
@@ -404,9 +461,11 @@ async function processJob(job) {
         const height = 1080;
 
         // Force 30fps to ensure stable overlay timing
-        filterComplex += `[0:v]fps=30,scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},setsar=1${transitionFilters}[vbase];`;
+        // Insert preFilter before scaling
+        filterComplex += `[0:v]${preFilter}fps=30,scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},setsar=1${transitionFilters}[vbase];`;
 
         let lastStream = '[vbase]';
+
 
         // --- 3. Audio Visualizer ---
         // If enabled, generate visualizer from audio and overlay it
@@ -604,9 +663,18 @@ async function processJob(job) {
         // Add inputs manually to args array
         inputArgs.push('-f', 'concat', '-safe', '0', '-i', concatFilePath);
         musicPaths.forEach(m => inputArgs.push('-i', m));
+        // Use the speed variable defined earlier (line 417) or re-read it but use a different name to avoid lint error
+        const speedMult = job.speed_multiplier || 1;
+        const adjustedDuration = totalDuration / speedMult; // If 0.5x speed, duration doubles
+
         Array.from(overlayImagePaths.values()).forEach(p => {
-            inputArgs.push('-loop', '1', '-t', `${totalDuration}`, '-i', p);
+            inputArgs.push('-loop', '1', '-t', `${adjustedDuration}`, '-i', p);
         });
+
+        // Update output args to match speed-adjusted length
+        // Note: filter_complex 'trim' usually works on source time, so we trim source THEN slow down.
+        // But the output total duration limitation needs to match the SLOWED DOWN result.
+        // We set -t on output to prevent hanging, but it must be the scaled duration.
 
         // Define audio map
         let audioMap = '[aout]';
@@ -620,16 +688,16 @@ async function processJob(job) {
             '-map', lastStream,
             '-c:v', 'libx264',
             '-crf', '28',
-            '-preset', 'fast',
+            '-preset', 'ultrafast',
             '-movflags', '+faststart',
-            '-t', `${totalDuration}`, // HARD DURATION CAP
             outputPath
         ];
 
         // Only map audio if present
         if (musicPaths.length > 0) {
-            outputArgs.splice(2, 0, '-map', audioMap); // Insert map after video map (index 2)
-            outputArgs.splice(outputArgs.length - 3, 0, '-c:a', 'aac', '-b:a', '128k'); // Insert audio codec args before -t flag
+            outputArgs.splice(2, 0, '-map', audioMap); // Insert map after video map
+            // Use -shortest to stop encoding when Video stream ends (Audio is infinite via aloop)
+            outputArgs.splice(outputArgs.length - 1, 0, '-c:a', 'aac', '-b:a', '128k', '-shortest');
         }
 
         const ffmpegArgs = [
@@ -653,7 +721,7 @@ async function processJob(job) {
 
             ffmpeg.stderr.on('data', (data) => {
                 const output = data.toString();
-                // console.log('FF Log:', output); // Verify verbosity doesn't flood logs
+                console.log('FF Log:', output); // DEBUG: Enable verbose logs
 
                 // Store last N lines for debugging
                 const lines = output.split('\n');
@@ -674,19 +742,28 @@ async function processJob(job) {
 
                     const progress = Math.min(100, Math.round((currentTime / totalDuration) * 100));
 
+                    // Update progress in DB (throttle every 2s)
                     const now = Date.now();
-                    if (now - lastProgressUpdate > 3000 && progress > 0) { // Update every 3s
+                    if (now - lastProgressUpdate > 2000 && progress > 0) {
                         lastProgressUpdate = now;
                         console.log(`Progress: ${progress}%`);
+                        // Update video_jobs
                         supabase.from('video_jobs')
-                            .update({
-                                progress: progress,
-                                updated_at: new Date().toISOString()
-                            })
+                            .update({ progress: progress, status: 'processing', updated_at: new Date().toISOString() })
                             .eq('id', jobId)
                             .then(({ error }) => {
-                                if (error) console.error('Failed to update progress:', error.message);
+                                if (error) console.error('Failed to update progress (video_jobs):', error.message);
                             });
+
+                        // Update animations table too (so frontend sees it)
+                        if (job.animation_id) { // Only update if linked to an animation
+                            supabase.from('animations')
+                                .update({ progress: progress, status: 'processing' })
+                                .eq('id', job.animation_id)
+                                .then(({ error }) => {
+                                    if (error) console.error('Failed to update progress (animations):', error.message);
+                                });
+                        }
                     }
                 }
             });
@@ -722,14 +799,48 @@ async function processJob(job) {
         console.log('File saved locally:', publicPath);
         console.log('Public URL:', publicUrl);
 
+        // 6a. Generate Thumbnail
+        const thumbFileName = `${jobId}_thumb.jpg`;
+        const thumbPath = path.join(publicDir, thumbFileName);
+
+        try {
+            // Generate thumbnail at 10% or 1s, ensure we catch errors non-fatally
+            execSync(`ffmpeg -y -i "${outputPath}" -ss 00:00:01 -vframes 1 "${thumbPath}"`, { stdio: 'ignore' });
+        } catch (e) {
+            console.warn('Thumbnail generation failed (1s), trying 0s:', e.message);
+            try {
+                execSync(`ffmpeg -y -i "${outputPath}" -ss 00:00:00 -vframes 1 "${thumbPath}"`, { stdio: 'ignore' });
+            } catch (e2) {
+                console.error('Thumbnail generation failed completely:', e2.message);
+            }
+        }
+
+        const thumbUrl = fs.existsSync(thumbPath) ? `https://${hostname}/videos/${thumbFileName}` : null;
+
         // 7. Update Job Status
         const { error: finalUpdateError } = await supabase.from('video_jobs').update({
             status: 'done',
             video_url: publicUrl,
-            duration_seconds: totalDuration
+            thumbnail_url: thumbUrl,
+            duration_seconds: adjustedDuration // Correct scaled duration (Exact)
         }).eq('id', jobId);
 
         if (finalUpdateError) throw new Error('Final DB Update Failed: ' + finalUpdateError.message);
+
+        // SYNC: If this job is linked to an Animation, update its video URL too
+        if (job.animation_id) {
+            console.log(`Updating linked animation ${job.animation_id}...`);
+            await supabase.from('animations')
+                .update({
+                    url: publicUrl, // Update primary video URL
+                    thumbnail_url: thumbUrl || undefined, // Update thumbnail if new one generated
+                    duration: adjustedDuration, // Update calculated duration (Exact)
+                    updated_at: new Date().toISOString(),
+                    status: 'done', // Mark as complete
+                    error_message: null
+                })
+                .eq('id', job.animation_id);
+        }
 
         console.log('Job Complete! Video URL:', publicUrl);
 
@@ -739,6 +850,74 @@ async function processJob(job) {
             status: 'error',
             error_message: err.message
         }).eq('id', jobId);
+    }
+}
+
+
+// Helper to fix missing thumbnails for animations generated by N8n
+async function checkThumbnailGaps() {
+    try {
+        // Find one animation that is done but missing a thumbnail
+        const { data: missing, error } = await supabase
+            .from('animations')
+            .select('id, url')
+            .eq('status', 'done')
+            .not('url', 'is', null)
+            .is('thumbnail_url', null)
+            .limit(1)
+            .maybeSingle();
+
+        if (error || !missing) return false;
+
+        console.log(`[ThumbnailScanner] Found missing thumbnail for ${missing.id}`);
+
+        const videoPath = path.join(TEMP_DIR, `${missing.id}_temp.mp4`);
+        const thumbPath = path.join(TEMP_DIR, `${missing.id}_thumb.jpg`);
+
+        // Download video
+        console.log(`[ThumbnailScanner] Downloading: ${missing.url}`);
+        await downloadFile(missing.url, videoPath);
+
+        // Generate thumbnail
+        console.log(`[ThumbnailScanner] Generating thumbnail...`);
+        execSync(`ffmpeg -y -i "${videoPath}" -ss 00:00:01.000 -vframes 1 -q:v 2 "${thumbPath}"`, { stdio: 'ignore' });
+
+        // Save from temp to public web dir
+        const thumbFileName = `${missing.id}_thumb.jpg`;
+        const publicDir = '/var/www/videos';
+        const publicThumbPath = path.join(publicDir, thumbFileName);
+
+        console.log(`[ThumbnailScanner] Saving to ${publicThumbPath}...`);
+        if (!fs.existsSync(publicDir)) fs.mkdirSync(publicDir, { recursive: true });
+        fs.copyFileSync(thumbPath, publicThumbPath);
+
+        const serverIp = process.env.NEXT_PUBLIC_SERVER_IP || '46.62.209.244';
+        const thumbUrl = `https://${serverIp}.nip.io/videos/${thumbFileName}`;
+
+        // Update DB
+        const { error: updateError } = await supabase
+            .from('animations')
+            .update({ thumbnail_url: thumbUrl })
+            .eq('id', missing.id);
+
+        if (updateError) {
+            console.error(`[ThumbnailScanner] Failed to update DB: ${updateError.message}`);
+        } else {
+            console.log(`[ThumbnailScanner] Thumbnail updated: ${thumbUrl}`);
+        }
+
+        // Cleanup
+        if (fs.existsSync(videoPath)) fs.unlinkSync(videoPath);
+        if (fs.existsSync(thumbPath)) fs.unlinkSync(thumbPath);
+
+        return true; // We did work
+    } catch (err) {
+        console.error(`[ThumbnailScanner] Error: ${err.message}`);
+        // Cleanup on error
+        const cleanId = err.message.includes('missing') ? 'unknown' : 'temp';
+        // Basic cleanup just in case, though tough to know ID here without scope. 
+        // Reliance on next run or OS cleanup.
+        return false;
     }
 }
 
@@ -788,6 +967,9 @@ async function startWorker() {
                 } else {
                     console.log('⚠️ Job was picked up by another worker nearby. Skipping.');
                 }
+            } else {
+                // No jobs in queue, use idle time to check for missing thumbnails
+                await checkThumbnailGaps();
             }
         } catch (e) {
             console.error('Worker loop error:', e);

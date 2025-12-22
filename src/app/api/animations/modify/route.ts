@@ -23,6 +23,7 @@ export async function POST(request: NextRequest) {
                 trim_end: trim_end || 0,
                 speed_multiplier: speed_multiplier || 1,
                 updated_at: new Date().toISOString(),
+                status: 'processing' // Immediate visual feedback
             })
             .eq('id', id)
             .select()
@@ -36,24 +37,50 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        // Trigger n8n webhook for FFmpeg processing
-        const n8nModifyWebhookUrl = process.env.N8N_MODIFY_WEBHOOK_URL;
-        if (n8nModifyWebhookUrl && animation.url) {
-            try {
-                await fetch(n8nModifyWebhookUrl, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        animation_id: id,
-                        video_url: animation.url,
-                        trim_start: trim_start || 0,
-                        trim_end: trim_end || 0,
-                        speed_multiplier: speed_multiplier || 1,
-                    }),
-                });
-            } catch (webhookError) {
-                console.error('Error triggering n8n modify webhook:', webhookError);
-            }
+        // Create a new modification job for the local worker
+        // 1. Fetch the most recent video job for this animation to get the audio_url and other props
+        const { data: previousJob, error: prevJobError } = await supabase
+            .from('video_jobs')
+            .select('audio_url, image_url, title_text')
+            .eq('animation_id', id)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .maybeSingle();
+
+        // Fallback for audio_url if no previous job found (should be rare if created via this tool)
+        // If it's missing, we might need a default or error, but let's try to proceed if possible.
+        const audioUrl = previousJob?.audio_url;
+
+        if (!audioUrl) {
+            console.log('No audio_url found for animation. Job will be created without audio (Silent).');
+        }
+
+        const { error: jobError } = await supabase.from('video_jobs').insert({
+            project_id: animation.project_id,
+            animation_id: id,
+            status: 'queued',
+            title_text: `Modify: ${animation.title_text || previousJob?.title_text || 'Untitled'}`,
+            assets: [
+                {
+                    type: 'video',
+                    url: animation.url, // Original video as source
+                    duration: animation.duration_seconds
+                }
+            ],
+            speed_multiplier: speed_multiplier || 1,
+            trim_start: trim_start || 0,
+            trim_end: trim_end || 0,
+            // Fallback chain: animation.image_url (if exists) -> previousJob -> animation.thumbnail_url -> placeholder
+            image_url: animation.image_url || previousJob?.image_url || animation.thumbnail_url || 'https://placehold.co/600x400?text=No+Image',
+            audio_url: audioUrl
+        });
+
+        if (jobError) {
+            console.error('Error creating modification job:', jobError);
+            return NextResponse.json(
+                { error: 'Failed to queue modification job' },
+                { status: 500 }
+            );
         }
 
         return NextResponse.json(animation);

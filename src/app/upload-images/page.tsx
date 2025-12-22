@@ -132,16 +132,30 @@ export default function UploadImagesPage() {
                 const fileExt = item.file.name.split('.').pop();
                 const fileName = `${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
 
-                const { data: uploadData, error: uploadError } = await supabase.storage
-                    .from('images')
-                    .upload(fileName, resizedBlob, { cacheControl: '3600', upsert: false, contentType: item.file.type });
+                // HETZNER STORAGE MIGRATION
+                // Upload directly to VP instead of Supabase
+                const formData = new FormData();
+                formData.append('type', 'images'); // server saves to /var/www/images
+                formData.append('file', resizedBlob, fileName);
 
-                if (uploadError) throw uploadError;
+                // Use env var or fallback
+                const serverIp = process.env.NEXT_PUBLIC_SERVER_IP || '46.62.209.244';
+                const uploadEndpoint = `https://${serverIp}.nip.io/upload`;
 
-                // Get public URL
-                const { data: { publicUrl } } = supabase.storage
-                    .from('images')
-                    .getPublicUrl(uploadData.path);
+                const uploadRes = await fetch(uploadEndpoint, {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (!uploadRes.ok) {
+                    const errorText = await uploadRes.text();
+                    throw new Error(`Upload Server Error: ${errorText}`);
+                }
+
+                const { url: publicUrl } = await uploadRes.json();
+
+                // Legacy: Mock the supabase return so we don't break downstream if it used uploadData
+                // But we only used publicUrl.
 
                 // Get image dimensions
                 const img = new Image();

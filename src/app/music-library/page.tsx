@@ -172,15 +172,25 @@ export default function MusicLibraryPage() {
                 const fileExt = file.name.split('.').pop();
                 const fileName = `${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
 
-                const { data: uploadData, error: uploadError } = await supabase.storage
-                    .from('audio')
-                    .upload(fileName, file, { cacheControl: '3600', upsert: false });
+                // HETZNER STORAGE MIGRATION
+                const formData = new FormData();
+                formData.append('type', 'music'); // /var/www/music (Must be before file)
+                formData.append('file', file, fileName);
 
-                if (uploadError) throw uploadError;
+                const serverIp = process.env.NEXT_PUBLIC_SERVER_IP || '46.62.209.244';
+                const uploadEndpoint = `https://${serverIp}.nip.io/upload`;
 
-                const { data: { publicUrl } } = supabase.storage
-                    .from('audio')
-                    .getPublicUrl(uploadData.path);
+                const uploadRes = await fetch(uploadEndpoint, {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (!uploadRes.ok) {
+                    const errorText = await uploadRes.text();
+                    throw new Error(`Upload Server Error: ${errorText}`);
+                }
+
+                const { url: publicUrl } = await uploadRes.json();
 
                 let duration: number | null = null;
                 try {

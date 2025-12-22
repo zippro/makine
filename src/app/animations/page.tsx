@@ -28,6 +28,7 @@ interface Animation {
     } | null;
     // Mock fields for now if not present in type yet, allowing UI to work with 'any' cast inside loop
     youtube_title?: string;
+    progress?: number;
 }
 
 export default function AnimationsPage() {
@@ -62,7 +63,14 @@ export default function AnimationsPage() {
     const fetchAnimations = useCallback(async () => {
         if (!currentProject) return;
         try {
-            const response = await fetch(`/api/animations?projectId=${currentProject.id}`);
+            // Add timestamp to prevent browser caching of the polling request
+            const response = await fetch(`/api/animations?projectId=${currentProject.id}&t=${Date.now()}`, {
+                cache: 'no-store',
+                headers: {
+                    'Pragma': 'no-cache',
+                    'Cache-Control': 'no-cache'
+                }
+            });
             if (!response.ok) throw new Error('Failed to fetch animations');
             const data = await response.json();
             setAnimations(data);
@@ -232,13 +240,13 @@ export default function AnimationsPage() {
         }
     };
 
-    const getStatusBadge = (status: string) => {
+    const getStatusBadge = (status: string, progress?: number) => {
         switch (status) {
             case 'queued':
                 return <span className="px-2 py-1 text-xs rounded-full bg-gray-500/20 text-gray-400">Queued</span>;
             case 'processing':
                 return <span className="px-2 py-1 text-xs rounded-full bg-primary/20 text-primary flex items-center gap-1">
-                    <Loader2 className="w-3 h-3 animate-spin" /> Processing
+                    <Loader2 className="w-3 h-3 animate-spin" /> {progress ? `Processing ${progress}%` : 'Processing'}
                 </span>;
             case 'done':
                 return <span className="px-2 py-1 text-xs rounded-full bg-success/20 text-success">Done</span>;
@@ -514,7 +522,7 @@ export default function AnimationsPage() {
 
                                     {/* Status Badge */}
                                     <div className="absolute top-3 left-3">
-                                        {getStatusBadge(animation.status)}
+                                        {getStatusBadge(animation.status, animation.progress)}
                                     </div>
 
                                     {/* Approved Badge */}
@@ -530,7 +538,7 @@ export default function AnimationsPage() {
                                     <div className="flex items-center justify-between mb-4">
                                         <div className="flex flex-col">
                                             <span className="text-xs font-mono text-gray-500">ID: {animation.id.slice(0, 4)}</span>
-                                            <span className="text-sm font-medium text-gray-300">{animation.duration}s</span>
+                                            <span className="text-sm font-medium text-gray-300">{Number(animation.duration).toFixed(1)}s</span>
                                         </div>
 
                                         {animation.video_usage_count > 0 && (
@@ -600,7 +608,7 @@ export default function AnimationsPage() {
                                                         type="range"
                                                         min="0.25"
                                                         max="4"
-                                                        step="0.25"
+                                                        step="0.05"
                                                         value={editSpeed}
                                                         draggable={false}
                                                         onDragStart={(e) => { e.preventDefault(); e.stopPropagation(); }}

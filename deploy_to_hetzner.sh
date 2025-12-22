@@ -63,6 +63,7 @@ echo "Cc: Uploading codebase..."
 # usage: we copy existing package.json.
 scp package.json root@$SERVER_IP:/root/worker/
 scp -r scripts/local_ffmpeg_worker.js root@$SERVER_IP:/root/worker/scripts/
+scp -r scripts/resource_server.js root@$SERVER_IP:/root/worker/scripts/
 scp .env.local root@$SERVER_IP:/root/worker/
 
 # 3. Setup Service (Auto-Restart) & Start
@@ -95,13 +96,36 @@ EnvironmentFile=/root/worker/.env.local
 WantedBy=multi-user.target
 SERVICE
 
+    # Create Systemd Service for Upload Server
+    cat > /etc/systemd/system/upload-server.service <<SERVICE_UPLOAD
+[Unit]
+Description=File Upload Server (Express)
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/worker
+ExecStart=/usr/bin/node scripts/resource_server.js
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+SERVICE_UPLOAD
+
     # Enable and Start
     systemctl daemon-reload
     systemctl enable video-worker
     systemctl restart video-worker
+    
+    systemctl enable upload-server
+    systemctl restart upload-server
 
     echo "✅ Worker Status:"
     systemctl status video-worker --no-pager
+    echo "✅ Upload Server Status:"
+    systemctl status upload-server --no-pager
 EOF
 
 echo "🎉 Deployment Complete!"
