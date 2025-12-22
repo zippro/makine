@@ -310,11 +310,84 @@ async function processJob(job) {
         let filterComplex = '';
 
         // --- 1. Audio Processing (Moved Up for Visualizer) ---
+        // --- 1. Audio Processing (Pre-process for Concat) ---
+        // Issue: If tracks have different sample rates/formats, concat fails or drops audio.
+        // Fix: Normalize EACH track to a common format (44100Hz, Stereo, FLTP) BEFORE concatenating.
+
         const audioInputStart = 1; // Video concat is 0
-        const musicConcatInputs = musicPaths.map((_, i) => `[${audioInputStart + i}:a]`).join('');
-        const musicConcat = musicPaths.length > 0
-            ? `${musicConcatInputs}concat=n=${musicPaths.length}:v=0:a=1[aout]`
+        let audioFilterString = '';
+        const normAudioLabels = [];
+
+        if (musicPaths.length > 0) {
+            musicPaths.forEach((_, i) => {
+                const inputLabel = `[${audioInputStart + i}:a]`;
+                const normLabel = `[a_norm_${i}]`;
+                // aresample=44100: async=1 handles drift. pan=stereo handles mono.
+                audioFilterString += `${inputLabel}aformat=sample_rates=44100:channel_layouts=stereo,aresample=44100:async=1${normLabel};`;
+                normAudioLabels.push(normLabel);
+            });
+        }
+
+        const musicConcat = normAudioLabels.length > 0
+            ? `${audioFilterString}${normAudioLabels.join('')}concat=n=${normAudioLabels.length}:v=0:a=1[aout]`
             : '';
+
+        // --- TRANSITIONS & LOOP Logic ---
+        // Calculate Transition Points (Dip to Black)
+        // We iterate through the expanded timeline loop to find "Change Points"
+        let currentTimestamp = 0;
+        const fadeDuration = 0.5; // 0.5s fade out, 0.5s fade in
+        let transitionFilters = '';
+
+        // We need to track the PREVIOUS ID to detect "Change"
+        let lastAssetId = null;
+
+        // Re-simulate the loop structure used in concat.txt construction to find timestamps
+        for (let loop = 0; loop < sequenceLoops; loop++) {
+            for (let i = 0; i < videoInputs.length; i++) {
+                // Identify the asset (from timeline or single legacy)
+                const asset = isAdvanced && timeline[i] ? timeline[i] : { id: 'legacy' };
+                // Use URL or specific ID as unique identifier
+                const currentId = asset.id || asset.url || 'unknown';
+                const duration = videoInputs[i].duration || 5; // Default reference
+
+                // How many internal loops for this asset?
+                const loopsForAsset = (isAdvanced && timeline[i]) ? (timeline[i].loop_count || 1) : 1;
+
+                for (let k = 0; k < loopsForAsset; k++) {
+                    // Check if this is a CHANGE (and not the very first item)
+                    if (currentTimestamp > 0 && lastAssetId !== currentId) {
+                        // WE HAVE A CHANGE!
+                        // Apply Dip to Black: fade OUT before currentTimestamp, fade IN after currentTimestamp
+                        // Actually, easiest visual hack: Draw a Black Box over the video with alpha animation.
+                        // Timeline: [StartFadeOut] --(0.5s)--> [CutPoint] --(0.5s)--> [EndFadeIn]
+                        // Box Alpha: 0 -> 1 (at CutPoint) -> 0
+
+                        const startFade = currentTimestamp - (fadeDuration / 2);
+                        const endFade = currentTimestamp + (fadeDuration / 2);
+
+                        // We will accumulate these enable times.
+                        // Actually, chaining drawbox filters is expensive.
+                        // Better: Create one "Black Layer" and toggle its alpha.
+
+                        // We'll collect all transition intervals and build a complex logical expression for alpha?
+                        // "if(between(t, 4.5, 5.5), ...)"
+                        // Complex expressions can get long.
+                        // Let's simplified approach: Just apply `fade` filter?
+                        // No, `fade` filter works on absolute start time.
+                        // `fade=t=out:st=Start:d=0.5:alpha=1, fade=t=in:st=Cut:d=0.5:alpha=1`
+
+                        // Problem: We are filtering [vbase] which is the CONTINUOUS stream.
+                        // We can apply multiple fade filters linearly.
+
+                        transitionFilters += `,fade=t=out:st=${startFade.toFixed(2)}:d=${(fadeDuration / 2).toFixed(2)}:alpha=1,fade=t=in:st=${currentTimestamp.toFixed(2)}:d=${(fadeDuration / 2).toFixed(2)}:alpha=1`;
+                    }
+
+                    currentTimestamp += duration;
+                    lastAssetId = currentId;
+                }
+            }
+        }
 
         if (musicConcat) {
             filterComplex += `${musicConcat};`;
@@ -331,7 +404,7 @@ async function processJob(job) {
         const height = 1080;
 
         // Force 30fps to ensure stable overlay timing
-        filterComplex += `[0:v]fps=30,scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},setsar=1[vbase];`;
+        filterComplex += `[0:v]fps=30,scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},setsar=1${transitionFilters}[vbase];`;
 
         let lastStream = '[vbase]';
 
@@ -629,38 +702,25 @@ async function processJob(job) {
             ffmpeg.on('error', (err) => reject(err));
         });
 
-        // 6. Upload with Retry
-        console.log('Uploading output...');
-        const fileBuffer = fs.readFileSync(outputPath);
-        const fileName = `${job.project_id}/${jobId}/output.mp4`;
-        const safeBucket = 'audio';
-        const safePath = `videos/${jobId}_output.mp4`;
+        // 6. Save to Local Web Server (Hetzner Storage)
+        console.log('Saving to local storage...');
+        const publicDir = '/var/www/videos';
+        if (!fs.existsSync(publicDir)) fs.mkdirSync(publicDir, { recursive: true });
 
-        let uploadError = null;
-        let publicUrl = '';
+        const videoFileName = `${jobId}.mp4`;
+        const publicPath = path.join(publicDir, videoFileName);
 
-        for (let attempt = 1; attempt <= 3; attempt++) {
-            try {
-                console.log(`Upload attempt ${attempt}/3...`);
-                const { error: upError } = await supabase.storage
-                    .from(safeBucket)
-                    .upload(safePath, fileBuffer, { contentType: 'video/mp4', upsert: true });
+        fs.copyFileSync(outputPath, publicPath);
 
-                if (upError) throw upError;
+        // Construct Public URL
+        // We expect NEXT_PUBLIC_SERVER_IP to be set in .env.local by deploy script
+        const serverIp = process.env.NEXT_PUBLIC_SERVER_IP || '46.62.209.244';
+        // Use Hostname for SSL (nip.io)
+        const hostname = `${serverIp}.nip.io`;
+        const publicUrl = `https://${hostname}/videos/${videoFileName}`;
 
-                const { data: urlData } = supabase.storage.from(safeBucket).getPublicUrl(safePath);
-                publicUrl = urlData.publicUrl;
-                uploadError = null;
-                console.log('Upload successful!');
-                break;
-            } catch (err) {
-                console.error(`Upload attempt ${attempt} failed:`, err.message);
-                uploadError = err;
-                if (attempt < 3) await new Promise(r => setTimeout(r, 2000 * attempt)); // Backoff
-            }
-        }
-
-        if (uploadError) throw new Error('Upload failed after 3 attempts: ' + uploadError.message);
+        console.log('File saved locally:', publicPath);
+        console.log('Public URL:', publicUrl);
 
         // 7. Update Job Status
         const { error: finalUpdateError } = await supabase.from('video_jobs').update({

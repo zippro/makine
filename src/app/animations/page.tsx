@@ -451,8 +451,14 @@ export default function AnimationsPage() {
                             <div
                                 key={animation.id}
                                 // Draggable Attributes
-                                draggable
-                                onDragStart={(e) => handleDragStart(e, animation.id)}
+                                draggable={editingId !== animation.id}
+                                onDragStart={(e) => {
+                                    if (editingId === animation.id) {
+                                        e.preventDefault();
+                                        return;
+                                    }
+                                    handleDragStart(e, animation.id);
+                                }}
                                 className={`group relative rounded-2xl border border-white/10 bg-[#121212] overflow-hidden hover:border-white/20 hover:shadow-2xl transition-all duration-300
                                     ${draggedAnimationId === animation.id ? 'opacity-50 border-primary border-dashed scale-95' : ''}
                                 `}
@@ -464,6 +470,7 @@ export default function AnimationsPage() {
                                 >
                                     {animation.url ? (
                                         <video
+                                            id={`preview-video-${animation.id}`}
                                             src={animation.url}
                                             className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity duration-500"
                                             muted
@@ -536,7 +543,11 @@ export default function AnimationsPage() {
                                     {/* Editing Controls */}
                                     {editingId === animation.id && animation.status === 'done' ? (
                                         <div className="space-y-4 animate-in fade-in slide-in-from-bottom-2">
-                                            <div className="space-y-3 p-3 rounded-xl bg-white/5 border border-white/10">
+                                            <div className="space-y-3 p-3 rounded-xl bg-white/5 border border-white/10"
+                                                // STOP DRAG for the entire controls container just in case
+                                                draggable={false}
+                                                onDragStart={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                                            >
                                                 <div className="space-y-1">
                                                     <div className="flex justify-between text-xs text-gray-400">
                                                         <span>Start</span>
@@ -548,7 +559,18 @@ export default function AnimationsPage() {
                                                         max={animation.duration - 1}
                                                         step="0.1"
                                                         value={editTrimStart}
-                                                        onChange={(e) => setEditTrimStart(parseFloat(e.target.value))}
+                                                        draggable={false}
+                                                        onDragStart={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                                                        onChange={(e) => {
+                                                            const val = parseFloat(e.target.value);
+                                                            setEditTrimStart(val);
+                                                            // Find video element and seek
+                                                            const vid = document.getElementById(`preview-video-${animation.id}`) as HTMLVideoElement;
+                                                            if (vid) {
+                                                                vid.currentTime = val;
+                                                                if (vid.paused) vid.play(); // Briefly play to show frame? Or just seek.
+                                                            }
+                                                        }}
                                                         className="w-full accent-white h-1 bg-white/10 rounded-lg appearance-none cursor-pointer"
                                                     />
                                                 </div>
@@ -563,6 +585,8 @@ export default function AnimationsPage() {
                                                         max={animation.duration - 1}
                                                         step="0.1"
                                                         value={editTrimEnd}
+                                                        draggable={false}
+                                                        onDragStart={(e) => { e.preventDefault(); e.stopPropagation(); }}
                                                         onChange={(e) => setEditTrimEnd(parseFloat(e.target.value))}
                                                         className="w-full accent-white h-1 bg-white/10 rounded-lg appearance-none cursor-pointer"
                                                     />
@@ -578,7 +602,14 @@ export default function AnimationsPage() {
                                                         max="4"
                                                         step="0.25"
                                                         value={editSpeed}
-                                                        onChange={(e) => setEditSpeed(parseFloat(e.target.value))}
+                                                        draggable={false}
+                                                        onDragStart={(e) => { e.preventDefault(); e.stopPropagation(); }}
+                                                        onChange={(e) => {
+                                                            const val = parseFloat(e.target.value);
+                                                            setEditSpeed(val);
+                                                            const vid = document.getElementById(`preview-video-${animation.id}`) as HTMLVideoElement;
+                                                            if (vid) vid.playbackRate = val;
+                                                        }}
                                                         className="w-full accent-white h-1 bg-white/10 rounded-lg appearance-none cursor-pointer"
                                                     />
                                                 </div>
