@@ -427,7 +427,7 @@ async function processJob(job) {
         }
 
         if (musicConcat) {
-            filterComplex += `${musicConcat};`;
+            filterComplex += `${musicConcat}`;
         } else {
             // Silence generation if no music? Or just skip.
         }
