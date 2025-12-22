@@ -385,7 +385,7 @@ async function processJob(job) {
                 // Identify the asset (from timeline or single legacy)
                 const asset = isAdvanced && timeline[i] ? timeline[i] : { id: 'legacy' };
                 // Use URL or specific ID as unique identifier
-                const currentId = asset.id || asset.url || 'unknown';
+                const currentPath = videoInputs[i].path; // Use file path to detect visual content changes
                 const duration = videoInputs[i].duration || 5; // Default reference
 
                 // How many internal loops for this asset?
@@ -393,7 +393,8 @@ async function processJob(job) {
 
                 for (let k = 0; k < loopsForAsset; k++) {
                     // Check if this is a CHANGE (and not the very first item)
-                    if (currentTimestamp > 0 && lastAssetId !== currentId) {
+                    // We compare paths to avoid fading if the same video is repeated (e.g. [A, A, B])
+                    if (currentTimestamp > 0 && lastAssetId !== currentPath) {
                         // WE HAVE A CHANGE!
                         // Apply Dip to Black: fade OUT before currentTimestamp, fade IN after currentTimestamp
                         // Actually, easiest visual hack: Draw a Black Box over the video with alpha animation.
@@ -421,7 +422,7 @@ async function processJob(job) {
                     }
 
                     currentTimestamp += duration;
-                    lastAssetId = currentId;
+                    lastAssetId = currentPath;
                 }
             }
         }
