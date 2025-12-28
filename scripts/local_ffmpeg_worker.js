@@ -2,7 +2,7 @@
 const { createClient } = require('@supabase/supabase-js');
 const fs = require('fs');
 const path = require('path');
-const { execSync } = require('child_process');
+const { execSync, spawn } = require('child_process');
 const supabase = createClient('https://lcysphtjcrhgopjrmjca.supabase.co', 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxjeXNwaHRqY3JoZ29wanJtamNhIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2NTQ2NjgxMCwiZXhwIjoyMDgxMDQyODEwfQ.qltTkMLZQ11sgUYUwk09xp2KOVgX2AdXTawDZSg_zJM');
 
 const TEMP_DIR = path.join('/tmp', 'rendi_worker');
@@ -46,6 +46,7 @@ async function processJob(job) {
     console.log(`Title: ${job.title_text}`);
 
     const jobId = job.id;
+    let audioOutputLabel; // Scoped to this job to prevent leakage
     const workDir = path.join(TEMP_DIR, jobId);
     if (!fs.existsSync(workDir)) fs.mkdirSync(workDir);
 
@@ -67,6 +68,7 @@ async function processJob(job) {
 
         const musicUrls = musicRel.map(m => m.music_library.url);
         const musicDurations = musicRel.map(m => m.music_library.duration_seconds || 0);
+        console.log(`Audio Tracks: ${musicDurations.length}, Durations: [${musicDurations.join(', ')}], Total: ${musicDurations.reduce((a, b) => a + b, 0)} seconds`);
 
         // 3. Analyze Assets (Legacy vs New)
         // Backend now sends assets as an array of objects
@@ -260,6 +262,55 @@ async function processJob(job) {
 
         if (musicPaths.length === 0) console.warn('Warning: No valid music tracks found. Video will be silent.');
 
+        // 3c-2. PRE-CONCATENATE AUDIO INTO ONE CLEAN FILE
+        // This is the new two-pass approach to fix all audio timestamp issues
+        let preConcatAudioPath = null;
+        if (musicPaths.length > 0) {
+            preConcatAudioPath = path.join(workDir, 'audio_preconcat.aac');
+
+            // Create concat list file for audio
+            const audioConcatListPath = path.join(workDir, 'audio_concat.txt');
+            let audioConcatContent = '';
+            for (const mp of musicPaths) {
+                audioConcatContent += `file '${mp}'\n`;
+            }
+            fs.writeFileSync(audioConcatListPath, audioConcatContent);
+            console.log(`Audio Concat List:\n${audioConcatContent}`);
+
+            // Run FFmpeg to pre-concat audio
+            console.log('Pre-concatenating audio tracks into single file...');
+            const preConcatArgs = [
+                '-y',
+                '-f', 'concat',
+                '-safe', '0',
+                '-i', audioConcatListPath,
+                '-c:a', 'aac',
+                '-b:a', '128k',
+                '-ar', '44100',
+                '-ac', '2',
+                preConcatAudioPath
+            ];
+
+            await new Promise((resolve, reject) => {
+                const proc = spawn('ffmpeg', preConcatArgs, { stdio: ['pipe', 'pipe', 'pipe'] });
+                let stderr = '';
+                proc.stderr.on('data', (data) => { stderr += data.toString(); });
+                proc.on('close', (code) => {
+                    if (code === 0) {
+                        console.log('Audio pre-concat complete!');
+                        resolve();
+                    } else {
+                        console.error('Audio pre-concat failed:', stderr);
+                        reject(new Error(`Audio pre-concat failed with code ${code}`));
+                    }
+                });
+            });
+
+            // Verify the pre-concat file
+            const preConcatStats = fs.statSync(preConcatAudioPath);
+            console.log(`Pre-concat audio file size: ${preConcatStats.size} bytes`);
+        }
+
         // 3d. Download Overlay Images
         const overlayImagePaths = new Map(); // key: overlay index, value: path
         for (let i = 0; i < overlays.length; i++) {
@@ -280,10 +331,15 @@ async function processJob(job) {
             }
         }
 
-        // 4. Calculate Duration
+        // 4. Calculate Duration & Audio Loops EARLY
         let totalDuration = Math.round(musicDurations.reduce((sum, d) => sum + (d || 0), 0));
         console.log(`calculated totalDuration: ${totalDuration}`);
-        if (totalDuration === 0) totalDuration = 10;
+        if (totalDuration === 0) console.log('Music duration is 0, will use timeline duration.');
+
+        // Calculate Audio Loops - set to 0 as placeholder, will be set to sequenceLoops after video loop calculation
+        // Audio MUST loop the same number of times as video to cover the full duration
+        let audioLoops = 1; // Will be updated after sequenceLoops is calculated
+        console.log(`Audio Looping Strategy: Will match video sequence loops`);
 
         // 4b. Get Speed Multiplier Early
         const SpeedMult = job.speed_multiplier || 1;
@@ -292,8 +348,18 @@ async function processJob(job) {
         // We need to loop the *sequence* of timeline items to match totalDuration.
         // BUT, if we are slowing down the video (speed < 1), the video itself becomes longer.
         // So we need fewer loops to fill the time.
-        let timelineDuration = timeline.reduce((sum, item) => sum + (item.duration || 5), 0);
+        // So we need fewer loops to fill the time.
+        let timelineDuration = timeline.reduce((sum, item) => {
+            let loops = 1;
+            if (isAdvanced && item.loop_count) loops = item.loop_count;
+            else if (job.default_loop_count) loops = job.default_loop_count; // Correct column name
+
+            return sum + ((item.duration || 5) * loops);
+        }, 0);
         if (timelineDuration === 0) timelineDuration = 5;
+
+        // If no music duration (no music or 0s metadata), use video timeline duration
+        if (totalDuration === 0) totalDuration = timelineDuration;
 
         // Effective duration of one sequence pass after speed adjustment
         const effectiveSequenceDuration = timelineDuration / SpeedMult;
@@ -301,7 +367,9 @@ async function processJob(job) {
         // How many times to repeat the whole sequence?
         // We compare Target Duration (Music) vs Effective Sequence Duration
         const sequenceLoops = Math.ceil(totalDuration / effectiveSequenceDuration);
-        console.log(`Sequence Duration: ${timelineDuration}, Speed: ${SpeedMult}, Effective: ${effectiveSequenceDuration}, Target: ${totalDuration}, Loops: ${sequenceLoops}`);
+        // Audio does NOT loop - the 7 tracks already total 25 min. Video loops to match.
+        // audioLoops stays at 1 (one pass through all tracks)
+        console.log(`Sequence Duration: ${timelineDuration}, Speed: ${SpeedMult}, Effective: ${effectiveSequenceDuration}, Target: ${totalDuration}, Video Loops: ${sequenceLoops}, Audio Loops: ${audioLoops}`);
 
         // Construct Flat Input List for Concat
         // We will reuse the same physical input files (videoInputs[i]), but refer to them multiple times in the filter graph?
@@ -319,14 +387,19 @@ async function processJob(job) {
         // New Logic: Respect individual asset loop_count
         for (let loop = 0; loop < sequenceLoops; loop++) {
             for (let i = 0; i < videoInputs.length; i++) {
-                // If Advanced mode, check timeline for loop_count
+                // Determine loop count for this asset
                 let loopsForAsset = 1;
-                if (isAdvanced && timeline[i]) {
-                    loopsForAsset = timeline[i].loop_count || 1;
+                if (isAdvanced && timeline[i] && timeline[i].loop_count) {
+                    loopsForAsset = timeline[i].loop_count;
+                } else if (job.default_loop_count) {
+                    loopsForAsset = job.default_loop_count; // Correct column name
                 }
 
                 for (let k = 0; k < loopsForAsset; k++) {
+                    // CRITICAL: Add inpoint 0 to reset timestamps for each segment
+                    // This prevents Non-monotonic DTS errors when the same file appears multiple times
                     concatContent += `file '${videoInputs[i].path}'\n`;
+                    concatContent += `inpoint 0\n`;
                 }
             }
         }
@@ -346,93 +419,13 @@ async function processJob(job) {
 
         let filterComplex = '';
 
-        // --- 1. Audio Processing (Moved Up for Visualizer) ---
-        // --- 1. Audio Processing (Pre-process for Concat) ---
-        // Issue: If tracks have different sample rates/formats, concat fails or drops audio.
-        // Fix: Normalize EACH track to a common format (44100Hz, Stereo, FLTP) BEFORE concatenating.
+        // --- 1. Audio Processing ---
+        // NEW APPROACH: Use pre-concatenated audio file (created above)
+        // This completely bypasses filter_complex for audio, avoiding all timestamp issues.
+        // Audio is now a SINGLE clean input file.
 
-        const audioInputStart = 1; // Video concat is 0
-        let audioFilterString = '';
-        const normAudioLabels = [];
-        let musicConcat = '';
-
-        if (musicPaths.length > 0) {
-            musicPaths.forEach((_, i) => {
-                const inputLabel = `[${audioInputStart + i}:a]`;
-                const normLabel = `[a_norm_${i}]`;
-                // aresample=44100: async=1 handles drift. pan=stereo handles mono.
-                audioFilterString += `${inputLabel}aformat=sample_rates=44100:channel_layouts=stereo,aresample=44100:async=1${normLabel};`;
-                normAudioLabels.push(normLabel);
-            });
-
-            // Concat and Loop
-            musicConcat = `${audioFilterString}${normAudioLabels.join('')}concat=n=${normAudioLabels.length}:v=0:a=1,aloop=loop=-1:size=2e9[aout];`;
-        }
-
-        // --- TRANSITIONS & LOOP Logic ---
-        // Calculate Transition Points (Dip to Black)
-        // We iterate through the expanded timeline loop to find "Change Points"
-        let currentTimestamp = 0;
-        const fadeDuration = 0.5; // 0.5s fade out, 0.5s fade in
-        let transitionFilters = '';
-
-        // We need to track the PREVIOUS ID to detect "Change"
-        let lastAssetId = null;
-
-        // Re-simulate the loop structure used in concat.txt construction to find timestamps
-        for (let loop = 0; loop < sequenceLoops; loop++) {
-            for (let i = 0; i < videoInputs.length; i++) {
-                // Identify the asset (from timeline or single legacy)
-                const asset = isAdvanced && timeline[i] ? timeline[i] : { id: 'legacy' };
-                // Use URL or specific ID as unique identifier
-                const currentPath = videoInputs[i].path; // Use file path to detect visual content changes
-                const duration = videoInputs[i].duration || 5; // Default reference
-
-                // How many internal loops for this asset?
-                const loopsForAsset = (isAdvanced && timeline[i]) ? (timeline[i].loop_count || 1) : 1;
-
-                for (let k = 0; k < loopsForAsset; k++) {
-                    // Check if this is a CHANGE (and not the very first item)
-                    // We compare paths to avoid fading if the same video is repeated (e.g. [A, A, B])
-                    if (currentTimestamp > 0 && lastAssetId !== currentPath) {
-                        // WE HAVE A CHANGE!
-                        // Apply Dip to Black: fade OUT before currentTimestamp, fade IN after currentTimestamp
-                        // Actually, easiest visual hack: Draw a Black Box over the video with alpha animation.
-                        // Timeline: [StartFadeOut] --(0.5s)--> [CutPoint] --(0.5s)--> [EndFadeIn]
-                        // Box Alpha: 0 -> 1 (at CutPoint) -> 0
-
-                        const startFade = currentTimestamp - (fadeDuration / 2);
-                        const endFade = currentTimestamp + (fadeDuration / 2);
-
-                        // We will accumulate these enable times.
-                        // Actually, chaining drawbox filters is expensive.
-                        // Better: Create one "Black Layer" and toggle its alpha.
-
-                        // We'll collect all transition intervals and build a complex logical expression for alpha?
-                        // "if(between(t, 4.5, 5.5), ...)"
-                        // Complex expressions can get long.
-                        // Let's simplified approach: Just apply `fade` filter?
-                        // No, `fade` filter works on absolute start time.
-                        // `fade=t=out:st=Start:d=0.5:alpha=1, fade=t=in:st=Cut:d=0.5:alpha=1`
-
-                        // Problem: We are filtering [vbase] which is the CONTINUOUS stream.
-                        // We can apply multiple fade filters linearly.
-
-                        transitionFilters += `,fade=t=out:st=${startFade.toFixed(2)}:d=${(fadeDuration / 2).toFixed(2)}:alpha=1,fade=t=in:st=${currentTimestamp.toFixed(2)}:d=${(fadeDuration / 2).toFixed(2)}:alpha=1`;
-                    }
-
-                    currentTimestamp += duration;
-                    lastAssetId = currentPath;
-                }
-            }
-        }
-
-        if (musicConcat) {
-            filterComplex += `${musicConcat}`;
-        } else {
-            // Silence generation if no music? Or just skip.
-        }
-
+        // No filter_complex needed for audio anymore!
+        // We'll just add the pre-concat audio as a simple input and map it directly.
 
         // --- 2. Video Base Processing ---
         // Apply Speed and Trim if present in job
@@ -442,11 +435,12 @@ async function processJob(job) {
 
         let preFilter = '';
         if (trimEnd > 0) {
-            // Trim logic
             preFilter += `trim=${trimStart}:${trimEnd},setpts=PTS-STARTPTS,`;
         } else if (trimStart > 0) {
             preFilter += `trim=${trimStart},setpts=PTS-STARTPTS,`;
         }
+
+
 
         // Speed Logic (setpts)
         // 0.5x speed = 2.0 * PTS (slower)
@@ -463,7 +457,8 @@ async function processJob(job) {
 
         // Force 30fps to ensure stable overlay timing
         // Insert preFilter before scaling
-        filterComplex += `[0:v]${preFilter}fps=30,scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},setsar=1${transitionFilters}[vbase];`;
+        // Note: Timestamp fixing is handled by -vsync cfr in output, not filter graph
+        filterComplex += `[0:v]${preFilter}fps=30,scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},setsar=1[vbase];`;
 
         let lastStream = '[vbase]';
 
@@ -555,9 +550,9 @@ async function processJob(job) {
         }
 
         // --- Overlays ---
-        // Overlay Input Indices start AFTER Video (1 input) and Audio inputs
-        // Video is input 0.
-        const overlayInputBaseIndex = 1 + musicPaths.length;
+        // Overlay Input Indices start AFTER Video (1 input) and Audio (1 pre-concat file)
+        // Video is input 0, Audio is input 1, Overlays start at 2.
+        const overlayInputBaseIndex = preConcatAudioPath ? 2 : 1;
         let currentOvImgIndex = 0;
 
         if (overlays.length > 0) {
@@ -662,14 +657,27 @@ async function processJob(job) {
         // --- Final Command ---
         const inputArgs = [];
         // Add inputs manually to args array
-        inputArgs.push('-f', 'concat', '-safe', '0', '-i', concatFilePath);
-        musicPaths.forEach(m => inputArgs.push('-i', m));
+        // CRITICAL: -fflags +genpts regenerates all timestamps from scratch, preventing Non-monotonic DTS errors
+        inputArgs.push('-fflags', '+genpts', '-f', 'concat', '-safe', '0', '-i', concatFilePath);
+
+        // Music Input - Single pre-concatenated audio file (NEW APPROACH)
+        // Instead of adding N individual audio files and complex filter_complex,
+        // we now use ONE pre-concatenated audio file with clean timestamps.
+        if (preConcatAudioPath) {
+            inputArgs.push('-i', preConcatAudioPath);
+        }
         // Use the speed variable defined earlier (line 417) or re-read it but use a different name to avoid lint error
         const speedMult = job.speed_multiplier || 1;
-        const adjustedDuration = totalDuration / speedMult; // If 0.5x speed, duration doubles
+
+        // FIX: If music determines duration, do NOT scale output duration by speed.
+        // The speed change affects the Visual Content looping frequency, not the Final File Duration.
+        // If no music, we assume 'totalDuration' refers to source content, so we scale it.
+        const finalOutputDuration = (musicPaths.length > 0)
+            ? totalDuration
+            : (totalDuration / speedMult);
 
         Array.from(overlayImagePaths.values()).forEach(p => {
-            inputArgs.push('-loop', '1', '-t', `${adjustedDuration}`, '-i', p);
+            inputArgs.push('-loop', '1', '-t', `${finalOutputDuration}`, '-i', p);
         });
 
         // Update output args to match speed-adjusted length
@@ -678,14 +686,18 @@ async function processJob(job) {
         // We set -t on output to prevent hanging, but it must be the scaled duration.
 
         // Define audio map
-        let audioMap = '[aout]';
+        // NEW: Use direct input mapping (1:a) for pre-concatenated audio file
+        // No filter_complex for audio means we map the audio input directly
+        let audioMap = '1:a'; // Input 0 = video concat, Input 1 = pre-concat audio
         if (typeof audioOutputLabel !== 'undefined') {
-            audioMap = audioOutputLabel;
+            audioMap = audioOutputLabel; // Visualizer may override this
         }
 
         const outputPath = path.join(workDir, 'output.mp4');
 
         const outputArgs = [
+            '-t', `${finalOutputDuration.toFixed(2)}`,
+            '-vsync', 'cfr', // CRITICAL: Force constant frame rate, regenerating all timestamps
             '-map', lastStream,
             '-c:v', 'libx264',
             '-crf', '28',
@@ -694,11 +706,10 @@ async function processJob(job) {
             outputPath
         ];
 
-        // Only map audio if present
-        if (musicPaths.length > 0) {
-            outputArgs.splice(2, 0, '-map', audioMap); // Insert map after video map
-            // Use -shortest to stop encoding when Video stream ends (Audio is infinite via aloop)
-            outputArgs.splice(outputArgs.length - 1, 0, '-c:a', 'aac', '-b:a', '128k', '-shortest');
+        // Only map audio if pre-concat audio exists
+        if (preConcatAudioPath) {
+            outputArgs.splice(2, 0, '-map', audioMap); // Insert after -t duration
+            outputArgs.splice(outputArgs.length - 1, 0, '-c:a', 'copy'); // Copy audio codec (already AAC from pre-concat)
         }
 
         const ffmpegArgs = [
@@ -713,7 +724,8 @@ async function processJob(job) {
 
         await new Promise((resolve, reject) => {
             const { spawn } = require('child_process');
-            const ffmpeg = spawn('ffmpeg', ffmpegArgs);
+            // Prevent deadlock by ignoring stdin/stdout (we only parse stderr)
+            const ffmpeg = spawn('ffmpeg', ffmpegArgs, { stdio: ['ignore', 'ignore', 'pipe'] });
 
             let lastProgressUpdate = 0;
 
@@ -746,6 +758,14 @@ async function processJob(job) {
                     // DEBUG PROGRESS
                     console.log(`[Progress Debug] Time: ${currentTime.toFixed(2)} / Total: ${totalDuration} | Progress: ${progress}%`);
 
+                    // FORCE FINISH: If we are at the end (within 0.5s), force FFmpeg to stop
+                    // This fixes the issue where FFmpeg hangs waiting for infinite audio loops even if video is done.
+                    // SIGINT tells FFmpeg to "stop encoding and finalize file (write MOOV atom)".
+                    if (currentTime >= totalDuration - 0.5) {
+                        console.log('✅ Reached end of video duration. Sending SIGINT to finalize file...');
+                        ffmpeg.kill('SIGINT');
+                    }
+
                     // Update progress in DB (throttle every 2s)
                     const now = Date.now();
                     if (now - lastProgressUpdate > 2000 && progress > 0) {
@@ -773,7 +793,8 @@ async function processJob(job) {
             });
 
             ffmpeg.on('close', (code) => {
-                if (code === 0) resolve();
+                // Code 255 is SIGINT (Interrupted), which we send manually to force finish. Treat as success.
+                if (code === 0 || code === 255) resolve();
                 else {
                     const stderrLog = stderrBuffer.join('\n');
                     reject(new Error(`FFmpeg exited with code ${code}. Log:\n${stderrLog}`));
@@ -826,7 +847,7 @@ async function processJob(job) {
             status: 'done',
             video_url: publicUrl,
             thumbnail_url: thumbUrl,
-            duration_seconds: adjustedDuration // Correct scaled duration (Exact)
+            duration_seconds: finalOutputDuration // Correct scaled duration (Exact)
         }).eq('id', jobId);
 
         if (finalUpdateError) throw new Error('Final DB Update Failed: ' + finalUpdateError.message);
@@ -838,12 +859,33 @@ async function processJob(job) {
                 .update({
                     url: publicUrl, // Update primary video URL
                     thumbnail_url: thumbUrl || undefined, // Update thumbnail if new one generated
-                    duration: adjustedDuration, // Update calculated duration (Exact)
+                    duration: finalOutputDuration, // Update calculated duration (Exact)
                     updated_at: new Date().toISOString(),
                     status: 'done', // Mark as complete
                     error_message: null
                 })
                 .eq('id', job.animation_id);
+        }
+
+        // INCREMENT video_usage_count for used animations
+        // Get the animation_id from the job
+        if (job.animation_id) {
+            console.log('Incrementing video_usage_count for animation:', job.animation_id);
+            await supabase.rpc('increment_animation_usage', { animation_id: job.animation_id });
+        }
+
+        // INCREMENT video_usage_count for used music tracks
+        // Get music IDs from job_music relation
+        const { data: usedMusic } = await supabase
+            .from('job_music')
+            .select('music_id')
+            .eq('job_id', jobId);
+
+        if (usedMusic && usedMusic.length > 0) {
+            console.log('Incrementing video_usage_count for', usedMusic.length, 'music tracks');
+            for (const { music_id } of usedMusic) {
+                await supabase.rpc('increment_music_usage', { music_id_input: music_id });
+            }
         }
 
         console.log('Job Complete! Video URL:', publicUrl);

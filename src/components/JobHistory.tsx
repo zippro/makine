@@ -42,6 +42,7 @@ export function JobHistory({ limit }: JobHistoryProps) {
                 .from('video_jobs')
                 .select('*')
                 .not('title_text', 'ilike', 'Modify:%') // Exclude modification jobs
+                .not('audio_url', 'is', null) // Only show combined videos (with audio)
                 .order('created_at', { ascending: false });
 
             // Project Isolation
@@ -89,7 +90,8 @@ export function JobHistory({ limit }: JobHistoryProps) {
         let query = supabase
             .from('video_jobs')
             .select('*')
-            .not('title_text', 'ilike', 'Modify:%')
+            .not('title_text', 'ilike', 'Modify:%') // Exclude modification jobs
+            .not('audio_url', 'is', null) // Only show combined videos (with audio)
             .order('created_at', { ascending: false });
 
         if (currentProject) {

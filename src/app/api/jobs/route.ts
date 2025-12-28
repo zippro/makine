@@ -214,12 +214,13 @@ export async function GET(request: NextRequest) {
         const { searchParams } = new URL(request.url);
         const projectId = searchParams.get('projectId');
 
+        const status = searchParams.get('status');
+
         if (!projectId) {
             return NextResponse.json({ error: 'Project ID required' }, { status: 400 });
         }
 
-        // Fetch all jobs with animation and music details
-        const { data: jobs, error: fetchError } = await supabase
+        let query = supabase
             .from('video_jobs')
             .select(`
                 *,
@@ -230,7 +231,16 @@ export async function GET(request: NextRequest) {
                 )
             `)
             .eq('project_id', projectId)
+            .not('title_text', 'ilike', 'Modify:%') // Filter out modifications
+            .not('audio_url', 'is', null) // Filter out silent animations
             .order('created_at', { ascending: false });
+
+        if (status) {
+            query = query.eq('status', status);
+        }
+
+        // Fetch all jobs with animation and music details
+        const { data: jobs, error: fetchError } = await query;
 
         if (fetchError) {
             console.error('Error fetching jobs:', fetchError);

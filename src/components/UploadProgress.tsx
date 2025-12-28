@@ -10,16 +10,18 @@ export interface UploadStatus {
     url?: string;
     animationId?: string;
     error?: string;
+    prompt?: string;
 }
 
 interface UploadProgressProps {
     items: UploadStatus[];
     onRemove: (id: string) => void;
     onUpload: () => void;
+    onPromptChange: (id: string, prompt: string) => void;
     uploading: boolean;
 }
 
-export default function UploadProgress({ items, onRemove, onUpload, uploading }: UploadProgressProps) {
+export default function UploadProgress({ items, onRemove, onUpload, onPromptChange, uploading }: UploadProgressProps) {
     if (items.length === 0) return null;
 
     const pendingCount = items.filter(img => img.status === 'pending').length;
@@ -52,63 +54,78 @@ export default function UploadProgress({ items, onRemove, onUpload, uploading }:
                 </div>
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                 {items.map((item) => (
                     <div
                         key={item.id}
-                        className="relative aspect-square rounded-xl overflow-hidden bg-card border border-border group"
+                        className="relative rounded-xl overflow-hidden bg-card border border-border group flex flex-col"
                     >
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img
-                            src={item.preview}
-                            alt={item.file.name}
-                            className="w-full h-full object-cover"
-                        />
+                        <div className="aspect-square relative">
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
+                                src={item.preview}
+                                alt={item.file.name}
+                                className="w-full h-full object-cover"
+                            />
 
-                        {/* Status Overlay */}
-                        <div className={`absolute inset-0 flex items-center justify-center transition-all ${item.status === 'pending' ? 'bg-transparent' :
-                            item.status === 'error' ? 'bg-error/50' :
-                                item.status === 'done' ? 'bg-success/20' : 'bg-black/50'
-                            }`}>
-                            {item.status === 'uploading' && (
-                                <div className="text-white text-center">
-                                    <Loader2 className="w-6 h-6 animate-spin mx-auto" />
-                                    <p className="text-xs mt-1">Uploading...</p>
-                                </div>
-                            )}
-                            {item.status === 'generating' && (
-                                <div className="text-white text-center">
-                                    <Loader2 className="w-6 h-6 animate-spin mx-auto" />
-                                    <p className="text-xs mt-1">Generating...</p>
-                                </div>
-                            )}
-                            {item.status === 'done' && (
-                                <div className="text-success text-center">
-                                    <div className="w-8 h-8 rounded-full bg-success flex items-center justify-center mx-auto">
-                                        <Check className="w-5 h-5 text-white" />
+                            {/* Status Overlay */}
+                            <div className={`absolute inset-0 flex items-center justify-center transition-all ${item.status === 'pending' ? 'bg-transparent' :
+                                item.status === 'error' ? 'bg-error/50' :
+                                    item.status === 'done' ? 'bg-success/20' : 'bg-black/50'
+                                }`}>
+                                {item.status === 'uploading' && (
+                                    <div className="text-white text-center">
+                                        <Loader2 className="w-6 h-6 animate-spin mx-auto" />
+                                        <p className="text-xs mt-1">Uploading...</p>
                                     </div>
-                                    <p className="text-xs mt-1 text-white">Queued</p>
-                                </div>
-                            )}
-                            {item.status === 'error' && (
-                                <div className="text-white text-center p-2">
-                                    <AlertCircle className="w-6 h-6 mx-auto" />
-                                    <p className="text-xs mt-1 line-clamp-2">{item.error}</p>
-                                </div>
+                                )}
+                                {item.status === 'generating' && (
+                                    <div className="text-white text-center">
+                                        <Loader2 className="w-6 h-6 animate-spin mx-auto" />
+                                        <p className="text-xs mt-1">Generating...</p>
+                                    </div>
+                                )}
+                                {item.status === 'done' && (
+                                    <div className="text-success text-center">
+                                        <div className="w-8 h-8 rounded-full bg-success flex items-center justify-center mx-auto">
+                                            <Check className="w-5 h-5 text-white" />
+                                        </div>
+                                        <p className="text-xs mt-1 text-white">Queued</p>
+                                    </div>
+                                )}
+                                {item.status === 'error' && (
+                                    <div className="text-white text-center p-2">
+                                        <AlertCircle className="w-6 h-6 mx-auto" />
+                                        <p className="text-xs mt-1 line-clamp-2">{item.error}</p>
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Remove Button */}
+                            {item.status === 'pending' && (
+                                <button
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        onRemove(item.id);
+                                    }}
+                                    className="absolute top-2 right-2 p-1.5 rounded-full bg-error/80 text-white opacity-0 group-hover:opacity-100 transition-opacity"
+                                >
+                                    <Trash2 className="w-4 h-4" />
+                                </button>
                             )}
                         </div>
 
-                        {/* Remove Button */}
+                        {/* Prompt Input */}
                         {item.status === 'pending' && (
-                            <button
-                                onClick={(e) => {
-                                    e.stopPropagation();
-                                    onRemove(item.id);
-                                }}
-                                className="absolute top-2 right-2 p-1.5 rounded-full bg-error/80 text-white opacity-0 group-hover:opacity-100 transition-opacity"
-                            >
-                                <Trash2 className="w-4 h-4" />
-                            </button>
+                            <div className="p-3 bg-card border-t border-border">
+                                <textarea
+                                    className="w-full bg-secondary/50 border border-border rounded-lg p-2 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary resize-none"
+                                    placeholder="Add extra words to support video prompt..."
+                                    rows={2}
+                                    value={item.prompt || ''}
+                                    onChange={(e) => onPromptChange(item.id, e.target.value)}
+                                />
+                            </div>
                         )}
                     </div>
                 ))}

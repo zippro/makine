@@ -774,15 +774,23 @@ export function ProjectConfigModal({ project, isOpen, onClose, onUpdate }: Proje
                                                                     if (!file) return;
 
                                                                     try {
-                                                                        const supabase = createClient();
-                                                                        const fileExt = file.name.split('.').pop();
-                                                                        const fileName = `overlay - ${Date.now()} -${Math.random()}.${fileExt} `;
-                                                                        // Use 'uploads' bucket as it is known to work
-                                                                        const { error: upErr } = await supabase.storage.from('uploads').upload(fileName, file);
-                                                                        if (upErr) throw upErr;
+                                                                        const formData = new FormData();
+                                                                        formData.append('file', file);
+                                                                        formData.append('project_id', project.id);
 
-                                                                        const { data: { publicUrl } } = supabase.storage.from('uploads').getPublicUrl(fileName);
-                                                                        updateOverlayImage(index, 'url', publicUrl);
+                                                                        // Use our proxy API which uploads to Hetzner and registers the image
+                                                                        const res = await fetch('/api/upload', {
+                                                                            method: 'POST',
+                                                                            body: formData
+                                                                        });
+
+                                                                        if (!res.ok) {
+                                                                            const err = await res.json();
+                                                                            throw new Error(err.error || 'Upload failed');
+                                                                        }
+
+                                                                        const data = await res.json();
+                                                                        updateOverlayImage(index, 'url', data.url);
                                                                     } catch (err) {
                                                                         console.error('Upload failed', err);
                                                                         alert('Failed to upload image');

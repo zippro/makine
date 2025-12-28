@@ -41,13 +41,33 @@ server {
 
     server_name _;
 
+    client_max_body_size 0;
+    proxy_read_timeout 36000s;
+    proxy_connect_timeout 36000s;
+    proxy_send_timeout 36000s;
+    fastcgi_read_timeout 36000s;
+
     location / {
-        try_files \\\$uri \\\$uri/ =404;
+        try_files \$uri \$uri/ =404;
     }
 
     location /videos/ {
         alias /var/www/videos/;
         autoindex off;
+    }
+
+    # Proxy for Upload Server (new addition to ensure uploads work via Nginx if we use proxy)
+    location /upload {
+        proxy_pass http://localhost:3001;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host \$host;
+        proxy_cache_bypass \$http_upgrade;
+        
+        proxy_read_timeout 36000s;
+        proxy_connect_timeout 36000s;
+        proxy_send_timeout 36000s;
     }
 }
 NGINX

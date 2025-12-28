@@ -111,6 +111,12 @@ export default function UploadImagesPage() {
         });
     };
 
+    const handlePromptChange = (id: string, prompt: string) => {
+        setProgress(prev => prev.map(img =>
+            img.id === id ? { ...img, prompt } : img
+        ));
+    };
+
     const uploadAndGenerate = async () => {
         if (!currentProject) return;
         setUploading(true);
@@ -217,6 +223,7 @@ export default function UploadImagesPage() {
                         animation_id: animation.id,
                         image_url: publicUrl,
                         duration: duration,
+                        prompt: item.prompt
                     }),
                 }).catch(err => console.error('Webhook trigger error:', err));
 
@@ -408,6 +415,7 @@ export default function UploadImagesPage() {
                     <UploadProgress
                         items={progress}
                         onRemove={removeImage}
+                        onPromptChange={handlePromptChange}
                         onUpload={uploadAndGenerate}
                         uploading={uploading}
                     />

@@ -1,0 +1,9 @@
+node_modules
+.next
+.git
+scripts/*.mp4
+scripts/*.wav
+scripts/*.png
+*.log
+temp_output_*.mp4
+.DS_Store

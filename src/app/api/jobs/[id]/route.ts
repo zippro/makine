@@ -2,10 +2,16 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 
 // Helper to extract path from URL
+// Helper to extract path from URL
 function extractStoragePath(url: string, bucket: string): string | null {
-    const regex = new RegExp(`/storage/v1/object/public/${bucket}/(.+)$`);
-    const match = url.match(regex);
-    return match ? match[1] : null;
+    if (!url) return null;
+    try {
+        const regex = new RegExp(`/storage/v1/object/public/${bucket}/(.+)$`);
+        const match = url.match(regex);
+        return match ? match[1] : null;
+    } catch (e) {
+        return null;
+    }
 }
 
 // GET /api/jobs/:id - Get job details

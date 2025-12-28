@@ -551,6 +551,14 @@ export default function Home() {
             <div className="p-4 border-b border-border flex items-center justify-between">
               <div className="flex items-center gap-2 overflow-hidden">
                 <h2 className="text-lg font-semibold text-foreground whitespace-nowrap">Select Animation</h2>
+                {/* Show selected count and total duration for multi-mode */}
+                {((currentProject as any)?.video_mode && (currentProject as any)?.video_mode !== 'simple_animation') && (
+                  <span className="text-sm text-primary font-medium whitespace-nowrap">
+                    ({((currentProject as any)?.template_assets || []).length} selected, {
+                      Math.round(((currentProject as any)?.template_assets || []).reduce((sum: number, a: any) => sum + (a.duration || 0), 0))
+                    }s total)
+                  </span>
+                )}
                 <div className="flex items-center gap-1 text-muted-foreground text-sm overflow-hidden text-ellipsis">
                   <span className="mx-1">/</span>
                   {currentAnimFolder !== '/' && (
@@ -661,11 +669,18 @@ export default function Home() {
                         <p className="text-sm font-medium truncate">{anim.images?.filename || 'Animation'}</p>
                       </div>
 
-                      {/* Usage Count Badge */}
+                      {/* Duration & Usage Count Badge */}
                       {!isSelected && (
-                        <div className="absolute top-2 right-2 bg-black/60 text-white text-xs px-2 py-1 rounded-full flex items-center gap-1 backdrop-blur-sm">
-                          <Video className="w-3 h-3" />
-                          {anim.video_usage_count || 0}
+                        <div className="absolute top-2 right-2 flex gap-1">
+                          {/* Duration Badge */}
+                          <div className="bg-black/60 text-white text-xs px-2 py-1 rounded-full backdrop-blur-sm">
+                            {Math.round(anim.duration || 0)}s
+                          </div>
+                          {/* Usage Count Badge */}
+                          <div className="bg-black/60 text-white text-xs px-2 py-1 rounded-full flex items-center gap-1 backdrop-blur-sm">
+                            <Video className="w-3 h-3" />
+                            {anim.video_usage_count || 0}
+                          </div>
                         </div>
                       )}
                     </button>
