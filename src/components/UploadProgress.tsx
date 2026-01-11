@@ -119,7 +119,7 @@ export default function UploadProgress({ items, onRemove, onUpload, onPromptChan
                         {item.status === 'pending' && (
                             <div className="p-3 bg-card border-t border-border">
                                 <textarea
-                                    className="w-full bg-secondary/50 border border-border rounded-lg p-2 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary resize-none"
+                                    className="w-full bg-zinc-800 border border-zinc-700 rounded-lg p-2 text-xs text-gray-200 placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-primary resize-none"
                                     placeholder="Add extra words to support video prompt..."
                                     rows={2}
                                     value={item.prompt || ''}

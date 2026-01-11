@@ -14,7 +14,7 @@ interface ProjectConfigModalProps {
     onUpdate: (updatedProject: Project) => void;
 }
 
-type Tab = 'general' | 'mode' | 'playlist' | 'overlays';
+type Tab = 'general' | 'mode' | 'overlays';
 
 interface TemplateAsset {
     id: string;
@@ -263,13 +263,9 @@ export function ProjectConfigModal({ project, isOpen, onClose, onUpdate }: Proje
                     <div className="w-56 border-r border-border bg-muted/10 p-3 space-y-1 overflow-y-auto">
                         {[
                             { id: 'mode' as Tab, icon: Play, label: 'Video Mode' },
-                            { id: 'playlist' as Tab, icon: List, label: 'Playlist' },
                             { id: 'overlays' as Tab, icon: Layers, label: 'Overlays' },
                             { id: 'general' as Tab, icon: Youtube, label: 'YouTube' },
-                        ].filter(tab => {
-                            if (tab.id === 'playlist' && videoMode === 'simple_animation') return false;
-                            return true;
-                        }).map((tab) => (
+                        ].map((tab) => (
                             <button
                                 key={tab.id}
                                 onClick={() => setActiveTab(tab.id)}
@@ -403,88 +399,7 @@ export function ProjectConfigModal({ project, isOpen, onClose, onUpdate }: Proje
                             </div>
                         )}
 
-                        {/* PLAYLIST TAB */}
-                        {activeTab === 'playlist' && (
-                            <div className="space-y-6">
-                                <div className="flex items-center justify-between border-b border-border pb-2">
-                                    <h3 className="text-lg font-semibold">
-                                        {videoMode === 'image_slideshow' ? 'Image Playlist' : 'Animation Playlist'}
-                                    </h3>
-                                    <button
-                                        type="button"
-                                        onClick={addAsset}
-                                        className="px-3 py-1.5 bg-primary/10 text-primary rounded-lg text-sm font-medium hover:bg-primary/20 flex items-center gap-1"
-                                    >
-                                        <Plus className="w-4 h-4" /> Add Item
-                                    </button>
-                                </div>
 
-                                <div className="space-y-2">
-                                    {templateAssets.map((asset, index) => (
-                                        <div key={asset.id} className="flex items-center gap-3 p-3 bg-card border border-border rounded-xl group hover:border-primary/50 transition-all">
-                                            {/* Sort Controls */}
-                                            <div className="flex flex-col gap-0.5">
-                                                <button type="button" onClick={() => moveAsset(index, 'up')} disabled={index === 0} className="p-1 text-muted hover:text-foreground disabled:opacity-30">
-                                                    <ChevronUp className="w-4 h-4" />
-                                                </button>
-                                                <button type="button" onClick={() => moveAsset(index, 'down')} disabled={index === templateAssets.length - 1} className="p-1 text-muted hover:text-foreground disabled:opacity-30">
-                                                    <ChevronDown className="w-4 h-4" />
-                                                </button>
-                                            </div>
-
-                                            {/* Preview */}
-                                            <div className="w-20 h-14 bg-muted rounded overflow-hidden flex-shrink-0">
-                                                {asset.url ? (
-                                                    // eslint-disable-next-line @next/next/no-img-element
-                                                    <img src={asset.url} className="w-full h-full object-cover" alt="" />
-                                                ) : (
-                                                    <div className="w-full h-full flex items-center justify-center text-xs text-muted">No URL</div>
-                                                )}
-                                            </div>
-
-                                            {/* Inputs */}
-                                            <div className="flex-1 space-y-2">
-                                                <input
-                                                    type="text"
-                                                    value={asset.url}
-                                                    onChange={(e) => updateAsset(index, 'url', e.target.value)}
-                                                    placeholder="Paste animation/image URL..."
-                                                    className="w-full text-sm bg-background border border-border rounded px-2 py-1.5"
-                                                />
-                                                <div className="flex items-center gap-3">
-                                                    {asset.type === 'animation' ? (
-                                                        <span className="text-xs text-muted">
-                                                            Loop: {defaultLoopCount}x (Global)
-                                                        </span>
-                                                    ) : (
-                                                        <label className="text-xs text-muted flex items-center gap-1.5">
-                                                            Duration (s):
-                                                            <input
-                                                                type="number"
-                                                                value={asset.duration}
-                                                                onChange={(e) => updateAsset(index, 'duration', parseInt(e.target.value) || 10)}
-                                                                className="w-16 text-xs bg-background border border-border rounded px-2 py-1"
-                                                                min="1"
-                                                            />
-                                                        </label>
-                                                    )}
-                                                </div>
-                                            </div>
-
-                                            {/* Delete */}
-                                            <button type="button" onClick={() => removeAsset(index)} className="p-2 text-muted hover:text-red-500 transition-colors">
-                                                <Trash2 className="w-4 h-4" />
-                                            </button>
-                                        </div>
-                                    ))}
-                                    {templateAssets.length === 0 && (
-                                        <div className="text-center py-12 text-muted border-2 border-dashed border-border rounded-xl">
-                                            No items added yet. Click "Add Item" to start.
-                                        </div>
-                                    )}
-                                </div>
-                            </div>
-                        )}
 
                         {/* OVERLAYS TAB */}
                         {activeTab === 'overlays' && (

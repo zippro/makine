@@ -110,3 +110,94 @@ export interface N8nWebhookPayload {
   duration_seconds?: number;
   error_message?: string;
 }
+
+// Todo System Types
+export type Priority = 'low' | 'medium' | 'high';
+
+export interface TodoList {
+  id: string;
+  project_id: string;
+  folder_id?: string;
+  name: string;
+  created_at: string;
+  updated_at: string;
+  // Computed fields (from joins)
+  items_count?: number;
+  completed_count?: number;
+}
+
+export interface TodoItem {
+  id: string;
+  todo_list_id: string;
+  title: string;
+  description?: string;
+  completed: boolean;
+  priority: Priority;
+  due_date?: string;
+  order_index: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DefaultTask {
+  id: string;
+  project_id: string;
+  title: string;
+  description?: string;
+  priority: Priority;
+  order_index: number;
+}
+
+// Dev Plan types
+export type DevPlanStatus = 'planned' | 'in_progress' | 'completed' | 'cancelled';
+
+export interface DevPlanVersion {
+  id: string;
+  name: string;
+  description?: string;
+  status: DevPlanStatus;
+  order_index: number;
+  created_at: string;
+  updated_at: string;
+  // Computed fields
+  tasks_count?: number;
+  completed_count?: number;
+}
+
+export interface DevPlanTask {
+  id: string;
+  version_id: string;
+  title: string;
+  description?: string;
+  completed: boolean;
+  priority: Priority;
+  order_index: number;
+  created_at: string;
+  updated_at: string;
+}
+
+// Channel Plan types
+export interface ChannelPlanContainer {
+  id: string;
+  name: string;
+  description?: string;
+  status: DevPlanStatus;
+  order_index: number;
+  created_at: string;
+  updated_at: string;
+  // Computed fields
+  items_count?: number;
+  completed_count?: number;
+}
+
+export interface ChannelPlanItem {
+  id: string;
+  container_id: string;
+  title: string;
+  description?: string;
+  completed: boolean;
+  priority: Priority;
+  order_index: number;
+  created_at: string;
+  updated_at: string;
+}

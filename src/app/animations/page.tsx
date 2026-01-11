@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import { Check, Trash2, Loader2, Video, AlertCircle, ChevronDown, ChevronUp, Play, X, FolderOpen } from 'lucide-react';
+import { Check, Trash2, Loader2, Video, AlertCircle, ChevronDown, ChevronUp, Play, X, FolderOpen, Edit2 } from 'lucide-react';
 import { useProject } from '@/context/ProjectContext';
 import { VideoDetailsModal } from '@/components/VideoDetailsModal';
 import { MoveAssetModal } from '@/components/MoveAssetModal';
@@ -56,6 +56,10 @@ export default function AnimationsPage() {
     // Drag & Drop State
     const [draggedAnimationId, setDraggedAnimationId] = useState<string | null>(null);
     const [dragOverFolder, setDragOverFolder] = useState<string | null>(null);
+
+    // Bulk Selection State
+    const [selectedAnimIds, setSelectedAnimIds] = useState<Set<string>>(new Set());
+    const [isSelectionMode, setIsSelectionMode] = useState(false);
 
     const { currentProject } = useProject();
 
@@ -146,6 +150,49 @@ export default function AnimationsPage() {
         return Array.from(folders).sort();
     };
 
+    const handleBulkDelete = async () => {
+        if (!confirm(`Are you sure you want to delete ${selectedAnimIds.size} animations?`)) return;
+
+        const idsToDelete = Array.from(selectedAnimIds);
+        setIsSelectionMode(false);
+
+        // Optimistic update
+        const remainingAnims = animations.filter(a => !selectedAnimIds.has(a.id));
+        setAnimations(remainingAnims);
+        setSelectedAnimIds(new Set());
+
+        let errors = 0;
+        for (const id of idsToDelete) {
+            try {
+                const res = await fetch(`/api/animations?id=${id}`, { method: 'DELETE' });
+                if (!res.ok) errors++;
+            } catch (e) {
+                console.error("Failed to delete", id, e);
+                errors++;
+            }
+        }
+
+        if (errors > 0) {
+            alert(`Failed to delete ${errors} animations.`);
+            fetchAnimations();
+        }
+    };
+
+    const toggleSelection = (id: string) => {
+        const next = new Set(selectedAnimIds);
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
+        setSelectedAnimIds(next);
+    };
+
+    const toggleSelectAll = (filesInView: Animation[]) => {
+        if (selectedAnimIds.size === filesInView.length) {
+            setSelectedAnimIds(new Set());
+        } else {
+            setSelectedAnimIds(new Set(filesInView.map(f => f.id)));
+        }
+    };
+
     const createFolder = async () => {
         const name = prompt('Folder Name:');
         if (!name) return;
@@ -170,6 +217,62 @@ export default function AnimationsPage() {
             alert('Failed to create folder');
         }
     }
+
+    const deleteFolder = async (e: React.MouseEvent, folderPath: string) => {
+        e.stopPropagation();
+        const folder = projectFolders.find(f => f.path === folderPath);
+        if (!folder) return;
+
+        const count = animations.filter(a => {
+            const f = (a as any).folder || '/';
+            return f === folderPath || f.startsWith(folderPath + '/');
+        }).length;
+
+        if (!confirm(`Delete folder "${folderPath.split('/').pop()}"?${count > 0 ? ` ${count} item(s) will be moved to root.` : ''}`)) return;
+
+        try {
+            const response = await fetch(`/api/folders?id=${folder.id}`, { method: 'DELETE' });
+            if (response.ok) {
+                await fetchFolders();
+                await fetchAnimations();
+                if (currentFolder.startsWith(folderPath)) setCurrentFolder('/');
+            } else {
+                throw new Error('Failed to delete folder');
+            }
+        } catch (e) {
+            alert('Failed to delete folder');
+        }
+    };
+
+    const renameFolder = async (e: React.MouseEvent, folderPath: string) => {
+        e.stopPropagation();
+        const folder = projectFolders.find(f => f.path === folderPath);
+        if (!folder) return;
+
+        const currentName = folderPath.split('/').pop() || '';
+        const newName = prompt('New folder name:', currentName);
+        if (!newName || newName === currentName) return;
+
+        try {
+            const response = await fetch('/api/folders', {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id: folder.id, new_name: newName })
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                await fetchFolders();
+                await fetchAnimations();
+                if (currentFolder === folderPath) setCurrentFolder(data.path);
+            } else {
+                const errData = await response.json();
+                alert(errData.error || 'Failed to rename folder');
+            }
+        } catch (e) {
+            alert('Failed to rename folder');
+        }
+    };
 
     const handleApprove = async (id: string) => {
         setUpdatingId(id);
@@ -361,27 +464,64 @@ export default function AnimationsPage() {
                     </div>
 
                     <div className="flex items-center gap-3">
-                        {currentFolder !== '/' && (
-                            <button
-                                onClick={() => setCurrentFolder(currentFolder.split('/').slice(0, -1).join('/') || '/')}
-                                onDragOver={(e) => handleDragOver(e, currentFolder.split('/').slice(0, -1).join('/') || '/')}
-                                onDrop={(e) => handleDrop(e, currentFolder.split('/').slice(0, -1).join('/') || '/')}
-                                className={`px-4 py-2 border rounded-xl bg-transparent transition-all text-sm font-medium text-gray-300 flex items-center gap-2
-                                    ${dragOverFolder === (currentFolder.split('/').slice(0, -1).join('/') || '/') ? 'border-primary bg-primary/10 text-primary' : 'border-white/10 hover:bg-white/5'}
-                                `}
-                            >
-                                <ChevronUp className="w-4 h-4" /> Up
-                            </button>
+                        {isSelectionMode ? (
+                            <>
+                                <span className="text-sm text-gray-400 mr-2">{selectedAnimIds.size} selected</span>
+                                <button
+                                    onClick={() => toggleSelectAll(visibleFiles)}
+                                    className="px-3 py-1.5 text-xs bg-white/10 hover:bg-white/20 rounded-xl text-white transition-all"
+                                >
+                                    {selectedAnimIds.size === visibleFiles.length ? 'Deselect All' : 'Select All'}
+                                </button>
+                                <button
+                                    onClick={handleBulkDelete}
+                                    disabled={selectedAnimIds.size === 0}
+                                    className="px-3 py-1.5 text-xs bg-red-500/20 text-red-400 hover:bg-red-500/30 border border-red-500/20 rounded-xl disabled:opacity-50 transition-all"
+                                >
+                                    Delete Selected
+                                </button>
+                                <button
+                                    onClick={() => {
+                                        setIsSelectionMode(false);
+                                        setSelectedAnimIds(new Set());
+                                    }}
+                                    className="px-3 py-1.5 text-xs hover:bg-white/10 rounded-xl text-gray-300 transition-all"
+                                >
+                                    Cancel
+                                </button>
+                            </>
+                        ) : (
+                            <>
+                                <button
+                                    onClick={() => setIsSelectionMode(true)}
+                                    className="px-3 py-1.5 text-xs bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl flex items-center gap-2 text-gray-300 transition-all"
+                                >
+                                    <span className="w-4 h-4 border border-current rounded-sm"></span>
+                                    Select Multiple
+                                </button>
+                                {currentFolder !== '/' && (
+                                    <button
+                                        onClick={() => setCurrentFolder(currentFolder.split('/').slice(0, -1).join('/') || '/')}
+                                        onDragOver={(e) => handleDragOver(e, currentFolder.split('/').slice(0, -1).join('/') || '/')}
+                                        onDrop={(e) => handleDrop(e, currentFolder.split('/').slice(0, -1).join('/') || '/')}
+                                        className={`px-4 py-2 border rounded-xl bg-transparent transition-all text-sm font-medium text-gray-300 flex items-center gap-2
+                                            ${dragOverFolder === (currentFolder.split('/').slice(0, -1).join('/') || '/') ? 'border-primary bg-primary/10 text-primary' : 'border-white/10 hover:bg-white/5'}
+                                        `}
+                                    >
+                                        <ChevronUp className="w-4 h-4" /> Up
+                                    </button>
+                                )}
+                                <button onClick={createFolder} className="px-4 py-2 border border-white/10 bg-white/5 text-white rounded-xl hover:bg-white/10 text-sm font-medium transition-all">
+                                    New Folder
+                                </button>
+                                <a
+                                    href="/upload-images"
+                                    className="px-5 py-2 rounded-xl bg-white text-black font-medium hover:bg-zinc-200 transition-all hover:scale-105 flex items-center gap-2"
+                                >
+                                    <Video className="w-4 h-4" /> Upload
+                                </a>
+                            </>
                         )}
-                        <button onClick={createFolder} className="px-4 py-2 border border-white/10 bg-white/5 text-white rounded-xl hover:bg-white/10 text-sm font-medium transition-all">
-                            New Folder
-                        </button>
-                        <a
-                            href="/upload-images"
-                            className="px-5 py-2 rounded-xl bg-white text-black font-medium hover:bg-zinc-200 transition-all hover:scale-105 flex items-center gap-2"
-                        >
-                            <Video className="w-4 h-4" /> Upload
-                        </a>
                     </div>
                 </div>
 
@@ -445,6 +585,24 @@ export default function AnimationsPage() {
                                         <span className="text-xs text-gray-500 mt-1">{count} item{count !== 1 ? 's' : ''}</span>
                                     </div>
 
+                                    {/* Folder Actions */}
+                                    <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                        <button
+                                            onClick={(e) => renameFolder(e, folderPath)}
+                                            className="p-1.5 rounded-lg bg-black/50 hover:bg-white/20 text-gray-400 hover:text-white backdrop-blur-sm transition-all"
+                                            title="Rename folder"
+                                        >
+                                            <Edit2 className="w-3.5 h-3.5" />
+                                        </button>
+                                        <button
+                                            onClick={(e) => deleteFolder(e, folderPath)}
+                                            className="p-1.5 rounded-lg bg-black/50 hover:bg-red-500/30 text-gray-400 hover:text-red-400 backdrop-blur-sm transition-all"
+                                            title="Delete folder"
+                                        >
+                                            <Trash2 className="w-3.5 h-3.5" />
+                                        </button>
+                                    </div>
+
                                     {isDragOver && (
                                         <div className="absolute inset-x-0 bottom-4 text-center text-xs font-bold text-primary animate-pulse">
                                             DROP TO MOVE HERE
@@ -459,22 +617,32 @@ export default function AnimationsPage() {
                             <div
                                 key={animation.id}
                                 // Draggable Attributes
-                                draggable={editingId !== animation.id}
+                                draggable={!isSelectionMode && editingId !== animation.id}
                                 onDragStart={(e) => {
-                                    if (editingId === animation.id) {
+                                    if (isSelectionMode || editingId === animation.id) {
                                         e.preventDefault();
                                         return;
                                     }
                                     handleDragStart(e, animation.id);
                                 }}
+                                onClick={() => isSelectionMode && toggleSelection(animation.id)}
                                 className={`group relative rounded-2xl border border-white/10 bg-[#121212] overflow-hidden hover:border-white/20 hover:shadow-2xl transition-all duration-300
                                     ${draggedAnimationId === animation.id ? 'opacity-50 border-primary border-dashed scale-95' : ''}
+                                    ${isSelectionMode && selectedAnimIds.has(animation.id) ? 'ring-2 ring-primary border-primary bg-primary/5' : ''}
+                                    ${isSelectionMode ? 'cursor-pointer' : ''}
                                 `}
                             >
+                                {isSelectionMode && (
+                                    <div className="absolute top-3 left-3 z-50">
+                                        <div className={`w-6 h-6 rounded-md border flex items-center justify-center transition-colors shadow-lg ${selectedAnimIds.has(animation.id) ? 'bg-primary border-primary' : 'bg-black/40 border-white/50 backdrop-blur-md'}`}>
+                                            {selectedAnimIds.has(animation.id) && <Check className="w-4 h-4 text-black" />}
+                                        </div>
+                                    </div>
+                                )}
                                 {/* Thumbnail/Video Preview */}
                                 <div
                                     className="aspect-video bg-black relative cursor-pointer overflow-hidden"
-                                    onClick={() => animation.url && setSelectedAnimation(animation)}
+                                    onClick={() => !isSelectionMode && animation.url && setSelectedAnimation(animation)}
                                 >
                                     {animation.url ? (
                                         <video
@@ -521,7 +689,7 @@ export default function AnimationsPage() {
                                     )}
 
                                     {/* Status Badge */}
-                                    <div className="absolute top-3 left-3">
+                                    <div className={`absolute top-3 left-3 ${isSelectionMode ? 'opacity-0 pointer-events-none' : ''}`}>
                                         {getStatusBadge(animation.status, animation.progress)}
                                     </div>
 

@@ -24,6 +24,10 @@ export default function UploadImagesPage() {
     const [draggedImageId, setDraggedImageId] = useState<string | null>(null);
     const [dragOverFolder, setDragOverFolder] = useState<string | null>(null);
 
+    // Bulk Selection State
+    const [selectedImageIds, setSelectedImageIds] = useState<Set<string>>(new Set());
+    const [isSelectionMode, setIsSelectionMode] = useState(false);
+
     // ... (fetch logic remains same) ...
 
     useEffect(() => {
@@ -82,6 +86,53 @@ export default function UploadImagesPage() {
             }
         });
         return Array.from(folders).sort();
+    };
+
+    const handleBulkDelete = async () => {
+        if (!confirm(`Are you sure you want to delete ${selectedImageIds.size} images?`)) return;
+
+        const idsToDelete = Array.from(selectedImageIds);
+        setIsSelectionMode(false); // Disable selection mode during deletion
+
+        // Optimistic update
+        const remainingImages = existingImages.filter(img => !selectedImageIds.has(img.id));
+        setExistingImages(remainingImages);
+        setSelectedImageIds(new Set());
+
+        let errors = 0;
+        for (const id of idsToDelete) {
+            try {
+                const res = await fetch(`/api/images?id=${id}`, { method: 'DELETE' });
+                if (!res.ok) errors++;
+            } catch (e) {
+                console.error("Failed to delete", id, e);
+                errors++;
+            }
+        }
+
+        if (errors > 0) {
+            alert(`Failed to delete ${errors} images. They may have reappeared.`);
+            // Refresh to ensure state consistency
+            if (currentProject) {
+                const res = await fetch(`/api/images?projectId=${currentProject.id}`);
+                setExistingImages(await res.json());
+            }
+        }
+    };
+
+    const toggleSelection = (id: string) => {
+        const next = new Set(selectedImageIds);
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
+        setSelectedImageIds(next);
+    };
+
+    const toggleSelectAll = (filesInView: any[]) => {
+        if (selectedImageIds.size === filesInView.length) {
+            setSelectedImageIds(new Set());
+        } else {
+            setSelectedImageIds(new Set(filesInView.map(f => f.id)));
+        }
     };
 
     const handleFilesSelected = (files: File[]) => {
@@ -438,6 +489,43 @@ export default function UploadImagesPage() {
                 <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 pb-12">
                     <div className="flex justify-between items-center mb-6">
                         <h2 className="text-2xl font-bold">Existing Images in Project</h2>
+                        <div className="flex items-center gap-2">
+                            {isSelectionMode ? (
+                                <>
+                                    <span className="text-sm text-muted-foreground mr-2">{selectedImageIds.size} selected</span>
+                                    <button
+                                        onClick={() => toggleSelectAll(visibleImages)}
+                                        className="px-3 py-1.5 text-xs bg-secondary hover:bg-secondary/80 rounded"
+                                    >
+                                        {selectedImageIds.size === visibleImages.length ? 'Deselect All' : 'Select All'}
+                                    </button>
+                                    <button
+                                        onClick={handleBulkDelete}
+                                        disabled={selectedImageIds.size === 0}
+                                        className="px-3 py-1.5 text-xs bg-red-500/20 text-red-400 hover:bg-red-500/30 border border-red-500/20 rounded disabled:opacity-50"
+                                    >
+                                        Delete Selected
+                                    </button>
+                                    <button
+                                        onClick={() => {
+                                            setIsSelectionMode(false);
+                                            setSelectedImageIds(new Set());
+                                        }}
+                                        className="px-3 py-1.5 text-xs hover:bg-white/10 rounded"
+                                    >
+                                        Cancel
+                                    </button>
+                                </>
+                            ) : (
+                                <button
+                                    onClick={() => setIsSelectionMode(true)}
+                                    className="px-3 py-1.5 text-xs bg-secondary hover:bg-secondary/80 rounded flex items-center gap-2"
+                                >
+                                    <span className="w-4 h-4 border border-current rounded-sm"></span>
+                                    Select Multiple
+                                </button>
+                            )}
+                        </div>
                         <button onClick={async () => {
                             const name = prompt('New Folder:');
                             if (name) {
@@ -488,18 +576,36 @@ export default function UploadImagesPage() {
                         {visibleImages.map((img, idx) => (
                             <div
                                 key={img.id || idx}
-                                draggable
-                                onDragStart={(e) => handleDragStart(e, img.id)}
-                                className={`relative group aspect-square bg-card rounded-xl overflow-hidden border transition-all
-                                    ${draggedImageId === img.id ? 'opacity-50 border-primary border-dashed' : 'border-border'}
+                                draggable={!isSelectionMode}
+                                onDragStart={(e) => {
+                                    if (!isSelectionMode) handleDragStart(e, img.id);
+                                }}
+                                onClick={() => {
+                                    if (isSelectionMode) toggleSelection(img.id);
+                                }}
+                                className={`relative group aspect-square bg-card rounded-xl overflow-hidden border transition-all cursor-pointer
+                                    ${isSelectionMode && selectedImageIds.has(img.id) ? 'ring-2 ring-primary border-primary' : 'border-border'}
+                                    ${!isSelectionMode && draggedImageId === img.id ? 'opacity-50 border-primary border-dashed' : ''}
                                 `}
                             >
                                 <img
                                     src={img.url || '/placeholder.svg'}
                                     alt={img.filename || 'Image'}
-                                    className="w-full h-full object-cover transition-transform group-hover:scale-105"
+                                    className={`w-full h-full object-cover transition-transform group-hover:scale-105 ${isSelectionMode && selectedImageIds.has(img.id) ? 'opacity-60' : ''}`}
                                 />
-                                <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-end p-4 gap-2">
+
+                                {isSelectionMode && (
+                                    <div className="absolute top-2 left-2 z-10">
+                                        <div className={`
+                                            w-6 h-6 rounded-md border flex items-center justify-center transition-colors shadow-sm
+                                            ${selectedImageIds.has(img.id) ? 'bg-primary border-primary' : 'bg-black/40 border-white/50'}
+                                        `}>
+                                            {selectedImageIds.has(img.id) && <div className="w-3 h-3 bg-white rounded-sm" />}
+                                        </div>
+                                    </div>
+                                )}
+
+                                <div className={`absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-end p-4 gap-2 ${isSelectionMode ? 'hidden' : ''}`}>
                                     <div className="flex justify-between items-end">
                                         <p className="text-white text-xs truncate flex-1 mr-2">{img.filename || 'Untitled'}</p>
                                         <button

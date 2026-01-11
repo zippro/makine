@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback, useRef } from 'react';
-import { Upload, Music, Loader2, Trash2, Play, Pause, Clock, Folder, FolderOpen } from 'lucide-react';
+import { Upload, Music, Loader2, Trash2, Play, Pause, Clock, Folder, FolderOpen, Edit2 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { useProject } from '@/context/ProjectContext';
 import { MoveAssetModal } from '@/components/MoveAssetModal';
@@ -33,6 +33,10 @@ export default function MusicLibraryPage() {
     // Drag & Drop State
     const [draggedTrackId, setDraggedTrackId] = useState<string | null>(null);
     const [dragOverFolder, setDragOverFolder] = useState<string | null>(null);
+
+    // Bulk Selection State
+    const [selectedTrackIds, setSelectedTrackIds] = useState<Set<string>>(new Set());
+    const [isSelectionMode, setIsSelectionMode] = useState(false);
 
     const { currentProject } = useProject();
 
@@ -117,6 +121,49 @@ export default function MusicLibraryPage() {
         return Array.from(folders).sort();
     };
 
+    const handleBulkDelete = async () => {
+        if (!confirm(`Are you sure you want to delete ${selectedTrackIds.size} tracks?`)) return;
+
+        const idsToDelete = Array.from(selectedTrackIds);
+        setIsSelectionMode(false);
+
+        // Optimistic update
+        const remainingMusic = music.filter(m => !selectedTrackIds.has(m.id));
+        setMusic(remainingMusic);
+        setSelectedTrackIds(new Set());
+
+        let errors = 0;
+        for (const id of idsToDelete) {
+            try {
+                const res = await fetch(`/api/music?id=${id}`, { method: 'DELETE' });
+                if (!res.ok) errors++;
+            } catch (e) {
+                console.error("Failed to delete", id, e);
+                errors++;
+            }
+        }
+
+        if (errors > 0) {
+            alert(`Failed to delete ${errors} tracks.`);
+            fetchMusic(); // Refresh on error
+        }
+    };
+
+    const toggleSelection = (id: string) => {
+        const next = new Set(selectedTrackIds);
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
+        setSelectedTrackIds(next);
+    };
+
+    const toggleSelectAll = (filesInView: MusicTrack[]) => {
+        if (selectedTrackIds.size === filesInView.length) {
+            setSelectedTrackIds(new Set());
+        } else {
+            setSelectedTrackIds(new Set(filesInView.map(f => f.id)));
+        }
+    };
+
     const createFolder = async () => {
         const name = prompt('Folder Name:');
         if (!name) return;
@@ -142,6 +189,62 @@ export default function MusicLibraryPage() {
             alert('Failed to create folder');
         }
     }
+
+    const deleteFolder = async (e: React.MouseEvent, folderPath: string) => {
+        e.stopPropagation();
+        const folder = projectFolders.find(f => f.path === folderPath);
+        if (!folder) return;
+
+        const count = music.filter(m => {
+            const f = (m as any).folder || '/';
+            return f === folderPath || f.startsWith(folderPath + '/');
+        }).length;
+
+        if (!confirm(`Delete folder "${folderPath.split('/').pop()}"?${count > 0 ? ` ${count} item(s) will be moved to root.` : ''}`)) return;
+
+        try {
+            const response = await fetch(`/api/folders?id=${folder.id}`, { method: 'DELETE' });
+            if (response.ok) {
+                await fetchFolders();
+                await fetchMusic();
+                if (currentFolder.startsWith(folderPath)) setCurrentFolder('/');
+            } else {
+                throw new Error('Failed to delete folder');
+            }
+        } catch (e) {
+            alert('Failed to delete folder');
+        }
+    };
+
+    const renameFolder = async (e: React.MouseEvent, folderPath: string) => {
+        e.stopPropagation();
+        const folder = projectFolders.find(f => f.path === folderPath);
+        if (!folder) return;
+
+        const currentName = folderPath.split('/').pop() || '';
+        const newName = prompt('New folder name:', currentName);
+        if (!newName || newName === currentName) return;
+
+        try {
+            const response = await fetch('/api/folders', {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id: folder.id, new_name: newName })
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                await fetchFolders();
+                await fetchMusic();
+                if (currentFolder === folderPath) setCurrentFolder(data.path);
+            } else {
+                const errData = await response.json();
+                alert(errData.error || 'Failed to rename folder');
+            }
+        } catch (e) {
+            alert('Failed to rename folder');
+        }
+    };
 
     const handleFileDrop = useCallback((e: React.DragEvent) => {
         e.preventDefault();
@@ -383,21 +486,58 @@ export default function MusicLibraryPage() {
                     </div>
 
                     <div className="flex items-center gap-2">
-                        {currentFolder !== '/' && (
-                            <button
-                                onClick={() => setCurrentFolder(currentFolder.split('/').slice(0, -1).join('/') || '/')}
-                                onDragOver={(e) => handleDragOver(e, currentFolder.split('/').slice(0, -1).join('/') || '/')}
-                                onDrop={(e) => handleDrop(e, currentFolder.split('/').slice(0, -1).join('/') || '/')}
-                                className={`px-4 py-2 border rounded-lg transition-all font-medium flex items-center gap-2
-                                    ${dragOverFolder === (currentFolder.split('/').slice(0, -1).join('/') || '/') ? 'border-primary bg-primary/10 text-primary' : 'border-border hover:bg-muted'}
-                                `}
-                            >
-                                Up
-                            </button>
+                        {isSelectionMode ? (
+                            <>
+                                <span className="text-sm text-muted-foreground mr-2">{selectedTrackIds.size} selected</span>
+                                <button
+                                    onClick={() => toggleSelectAll(visibleFiles)}
+                                    className="px-3 py-1.5 text-xs bg-secondary hover:bg-secondary/80 rounded"
+                                >
+                                    {selectedTrackIds.size === visibleFiles.length ? 'Deselect All' : 'Select All'}
+                                </button>
+                                <button
+                                    onClick={handleBulkDelete}
+                                    disabled={selectedTrackIds.size === 0}
+                                    className="px-3 py-1.5 text-xs bg-red-500/20 text-red-400 hover:bg-red-500/30 border border-red-500/20 rounded disabled:opacity-50"
+                                >
+                                    Delete Selected
+                                </button>
+                                <button
+                                    onClick={() => {
+                                        setIsSelectionMode(false);
+                                        setSelectedTrackIds(new Set());
+                                    }}
+                                    className="px-3 py-1.5 text-xs hover:bg-white/10 rounded"
+                                >
+                                    Cancel
+                                </button>
+                            </>
+                        ) : (
+                            <>
+                                <button
+                                    onClick={() => setIsSelectionMode(true)}
+                                    className="px-3 py-1.5 text-xs bg-secondary hover:bg-secondary/80 rounded flex items-center gap-2"
+                                >
+                                    <span className="w-4 h-4 border border-current rounded-sm"></span>
+                                    Select Multiple
+                                </button>
+                                {currentFolder !== '/' && (
+                                    <button
+                                        onClick={() => setCurrentFolder(currentFolder.split('/').slice(0, -1).join('/') || '/')}
+                                        onDragOver={(e) => handleDragOver(e, currentFolder.split('/').slice(0, -1).join('/') || '/')}
+                                        onDrop={(e) => handleDrop(e, currentFolder.split('/').slice(0, -1).join('/') || '/')}
+                                        className={`px-4 py-2 border rounded-lg transition-all font-medium flex items-center gap-2
+                                            ${dragOverFolder === (currentFolder.split('/').slice(0, -1).join('/') || '/') ? 'border-primary bg-primary/10 text-primary' : 'border-border hover:bg-muted'}
+                                        `}
+                                    >
+                                        Up
+                                    </button>
+                                )}
+                                <button onClick={createFolder} className="px-4 py-2 border border-primary/20 bg-primary/10 text-primary rounded-lg hover:bg-primary/20 font-medium transition-all">
+                                    + New Folder
+                                </button>
+                            </>
                         )}
-                        <button onClick={createFolder} className="px-4 py-2 border border-primary/20 bg-primary/10 text-primary rounded-lg hover:bg-primary/20 font-medium transition-all">
-                            + New Folder
-                        </button>
                     </div>
                 </div>
 
@@ -468,7 +608,7 @@ export default function MusicLibraryPage() {
                                     onDragOver={(e) => handleDragOver(e, folderPath)}
                                     onDragLeave={handleDragLeave}
                                     onDrop={(e) => handleDrop(e, folderPath)}
-                                    className={`flex items-center gap-4 p-4 rounded-xl bg-card border cursor-pointer transition-all
+                                    className={`group flex items-center gap-4 p-4 rounded-xl bg-card border cursor-pointer transition-all
                                         ${isDragOver
                                             ? 'border-primary bg-primary/10 scale-[1.01] shadow-lg'
                                             : 'border-border hover:border-primary/50'
@@ -481,6 +621,24 @@ export default function MusicLibraryPage() {
                                     <div className="flex-1">
                                         <p className={`font-medium ${isDragOver ? 'text-primary' : 'text-foreground'}`}>{folderName}</p>
                                         <p className="text-xs text-muted">{count} music file{count !== 1 ? 's' : ''}</p>
+                                    </div>
+
+                                    {/* Folder Actions */}
+                                    <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                        <button
+                                            onClick={(e) => renameFolder(e, folderPath)}
+                                            className="p-1.5 rounded-lg hover:bg-primary/20 text-muted hover:text-primary transition-all"
+                                            title="Rename folder"
+                                        >
+                                            <Edit2 className="w-4 h-4" />
+                                        </button>
+                                        <button
+                                            onClick={(e) => deleteFolder(e, folderPath)}
+                                            className="p-1.5 rounded-lg hover:bg-red-500/20 text-muted hover:text-red-400 transition-all"
+                                            title="Delete folder"
+                                        >
+                                            <Trash2 className="w-4 h-4" />
+                                        </button>
                                     </div>
 
                                     {isDragOver && (
@@ -496,12 +654,26 @@ export default function MusicLibraryPage() {
                         {visibleFiles.map((track) => (
                             <div
                                 key={track.id}
-                                draggable
-                                onDragStart={(e) => handleDragStart(e, track.id)}
-                                className={`flex items-center gap-4 p-4 rounded-xl bg-card border transition-all
-                                    ${draggedTrackId === track.id ? 'opacity-50 border-primary border-dashed' : 'border-border hover:border-primary/50'}
+                                draggable={!isSelectionMode}
+                                onDragStart={(e) => {
+                                    if (!isSelectionMode) handleDragStart(e, track.id);
+                                }}
+                                onClick={() => {
+                                    if (isSelectionMode) toggleSelection(track.id);
+                                }}
+                                className={`flex items-center gap-4 p-4 rounded-xl bg-card border transition-all cursor-pointer
+                                    ${isSelectionMode && selectedTrackIds.has(track.id) ? 'border-primary bg-primary/5 ring-1 ring-primary' : 'border-border hover:border-primary/50'}
+                                    ${!isSelectionMode && draggedTrackId === track.id ? 'opacity-50 border-primary border-dashed' : ''}
                                 `}
                             >
+                                {isSelectionMode && (
+                                    <div className={`
+                                        w-5 h-5 rounded border flex items-center justify-center transition-colors shrink-0
+                                        ${selectedTrackIds.has(track.id) ? 'bg-primary border-primary' : 'bg-transparent border-muted-foreground'}
+                                    `}>
+                                        {selectedTrackIds.has(track.id) && <div className="w-2.5 h-2.5 bg-white rounded-sm" />}
+                                    </div>
+                                )}
                                 <button
                                     onClick={() => togglePlay(track)}
                                     className="p-3 rounded-full bg-primary/10 text-primary hover:bg-primary hover:text-black transition-all"

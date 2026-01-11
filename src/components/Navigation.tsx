@@ -2,16 +2,21 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { Video, History, Image, Music, FolderOpen, Home, Clapperboard, ChevronDown, Check } from "lucide-react";
+import { usePathname, useRouter } from "next/navigation";
+import { Video, History, Image, Music, FolderOpen, Home, Clapperboard, ChevronDown, Check, ListTodo, LogOut } from "lucide-react";
 import { useProject } from "@/context/ProjectContext";
+import { createClient } from "@/lib/supabase/client";
 
 export default function Navigation() {
     const pathname = usePathname();
-    const { currentProject, projects, selectProject, isLoading } = useProject();
+    const router = useRouter();
+    const { currentProject, projects, selectProject, isLoading, user } = useProject();
     const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+    const supabase = createClient();
 
     const isActive = (path: string) => pathname === path;
+
+    if (pathname === '/login') return null;
 
     return (
         <nav className="fixed top-0 left-0 right-0 z-50 border-b border-border bg-background/80 backdrop-blur-md">
@@ -114,6 +119,17 @@ export default function Navigation() {
                             <span className="hidden sm:inline">Projects</span>
                         </Link>
 
+                        <Link
+                            href="/todos"
+                            className={`flex items-center gap-1.5 rounded-lg px-2 sm:px-3 py-2 text-sm transition-colors ${isActive("/todos")
+                                ? "bg-primary/10 text-primary font-medium"
+                                : "text-muted hover:text-foreground hover:bg-card"
+                                }`}
+                        >
+                            <ListTodo className="h-4 w-4" />
+                            <span className="hidden sm:inline">Todos</span>
+                        </Link>
+
                         <div className="h-4 w-px bg-border mx-1" />
 
                         <Link
@@ -171,6 +187,43 @@ export default function Navigation() {
                         >
                             <span className="hidden sm:inline">Publish</span>
                         </Link>
+
+                        <div className="h-4 w-px bg-border mx-1" />
+
+                        {user?.email && (
+                            <div className="hidden lg:flex flex-col items-end mr-2">
+                                <span className="text-xs font-medium text-foreground">{user.email}</span>
+                            </div>
+                        )}
+
+                        <button
+                            onClick={async () => {
+                                try {
+                                    // 1. Client-side cleanup (just in case)
+                                    localStorage.clear();
+
+                                    // 2. Server-side cleanup (The real fix)
+                                    // We use a fetch to trigger the server route which clears cookies
+                                    // Using POST to stick to semantics for state change
+                                    const response = await fetch('/auth/signout', {
+                                        method: 'POST',
+                                    });
+
+                                    if (response.redirected) {
+                                        window.location.href = response.url;
+                                    } else {
+                                        window.location.href = '/login';
+                                    }
+                                } catch (e) {
+                                    console.error("Logout error:", e);
+                                    window.location.href = '/login';
+                                }
+                            }}
+                            className="flex items-center gap-1.5 rounded-lg px-2 sm:px-3 py-2 text-sm text-muted hover:text-red-400 hover:bg-card transition-colors"
+                            title="Sign Out"
+                        >
+                            <LogOut className="h-4 w-4" />
+                        </button>
                     </div>
                 </div>
             </div>

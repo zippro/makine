@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { HelpCircle } from 'lucide-react';
+import { HelpCircle, Rocket, Calendar } from 'lucide-react';
 
 export function Footer() {
     return (
@@ -9,13 +9,29 @@ export function Footer() {
                     &copy; {new Date().getFullYear()} Makine. All rights reserved.
                 </p>
 
-                <Link
-                    href="/walkthrough"
-                    className="flex items-center gap-2 text-sm text-primary hover:text-primary-hover transition-colors px-4 py-2 rounded-lg hover:bg-primary/10"
-                >
-                    <HelpCircle className="w-4 h-4" />
-                    How it Works
-                </Link>
+                <div className="flex items-center gap-2">
+                    <Link
+                        href="/channel-plans"
+                        className="flex items-center gap-2 text-sm text-muted-foreground hover:text-primary transition-colors px-4 py-2 rounded-lg hover:bg-primary/10"
+                    >
+                        <Calendar className="w-4 h-4" />
+                        Channel Plans
+                    </Link>
+                    <Link
+                        href="/dev-plan"
+                        className="flex items-center gap-2 text-sm text-muted-foreground hover:text-primary transition-colors px-4 py-2 rounded-lg hover:bg-primary/10"
+                    >
+                        <Rocket className="w-4 h-4" />
+                        Dev Plan
+                    </Link>
+                    <Link
+                        href="/walkthrough"
+                        className="flex items-center gap-2 text-sm text-primary hover:text-primary-hover transition-colors px-4 py-2 rounded-lg hover:bg-primary/10"
+                    >
+                        <HelpCircle className="w-4 h-4" />
+                        How it Works
+                    </Link>
+                </div>
             </div>
         </footer>
     );
