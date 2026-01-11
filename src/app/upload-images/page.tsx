@@ -7,7 +7,7 @@ import AnimationDurationSelect from '@/components/AnimationDurationSelect';
 import UploadProgress, { UploadStatus } from '@/components/UploadProgress';
 import { useProject } from '@/context/ProjectContext';
 import { MoveAssetModal } from '@/components/MoveAssetModal';
-import { Folder } from 'lucide-react';
+import { Folder, Edit2, Trash2 } from 'lucide-react';
 
 export default function UploadImagesPage() {
     const { currentProject } = useProject();
@@ -368,6 +368,66 @@ export default function UploadImagesPage() {
         }
     };
 
+    const deleteFolder = async (e: React.MouseEvent, folderPath: string) => {
+        e.stopPropagation();
+        const folder = projectFolders.find(f => f.path === folderPath);
+        if (!folder) return;
+
+        const count = existingImages.filter(img => {
+            const f = img.folder || '/';
+            return f === folderPath || f.startsWith(folderPath + '/');
+        }).length;
+
+        if (!confirm(`Delete folder "${folderPath.split('/').pop()}"?${count > 0 ? ` ${count} item(s) will be moved to root.` : ''}`)) return;
+
+        try {
+            const response = await fetch(`/api/folders?id=${folder.id}`, { method: 'DELETE' });
+            if (response.ok) {
+                const fRes = await fetch(`/api/folders?projectId=${currentProject?.id}`);
+                setProjectFolders(await fRes.json());
+                const iRes = await fetch(`/api/images?projectId=${currentProject?.id}`);
+                setExistingImages(await iRes.json());
+                if (currentFolder.startsWith(folderPath)) setCurrentFolder('/');
+            } else {
+                throw new Error('Failed to delete folder');
+            }
+        } catch (e) {
+            alert('Failed to delete folder');
+        }
+    };
+
+    const renameFolder = async (e: React.MouseEvent, folderPath: string) => {
+        e.stopPropagation();
+        const folder = projectFolders.find(f => f.path === folderPath);
+        if (!folder) return;
+
+        const currentName = folderPath.split('/').pop() || '';
+        const newName = prompt('New folder name:', currentName);
+        if (!newName || newName === currentName) return;
+
+        try {
+            const response = await fetch('/api/folders', {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id: folder.id, new_name: newName })
+            });
+
+            if (response.ok) {
+                const data = await response.json();
+                const fRes = await fetch(`/api/folders?projectId=${currentProject?.id}`);
+                setProjectFolders(await fRes.json());
+                const iRes = await fetch(`/api/images?projectId=${currentProject?.id}`);
+                setExistingImages(await iRes.json());
+                if (currentFolder === folderPath) setCurrentFolder(data.path);
+            } else {
+                const errData = await response.json();
+                alert(errData.error || 'Failed to rename folder');
+            }
+        } catch (e) {
+            alert('Failed to rename folder');
+        }
+    };
+
 
     // ... render logic ...
     const visibleFolders = getSubfolders(existingImages, currentFolder);
@@ -558,7 +618,7 @@ export default function UploadImagesPage() {
                                     // Drag Handlers
                                     onDragOver={(e) => handleDragOver(e, folderPath)}
                                     onDrop={(e) => handleDrop(e, folderPath)}
-                                    className={`aspect-square rounded-xl border-2 border-dashed flex flex-col items-center justify-center gap-2 cursor-pointer transition-all
+                                    className={`group relative aspect-square rounded-xl border-2 border-dashed flex flex-col items-center justify-center gap-2 cursor-pointer transition-all
                                         ${isDragOver
                                             ? 'border-primary bg-primary/10 scale-105 shadow-xl text-primary'
                                             : 'border-border hover:border-primary/50 text-muted hover:text-foreground'
@@ -568,6 +628,24 @@ export default function UploadImagesPage() {
                                     <Folder className={`w-12 h-12 ${isDragOver ? 'animate-bounce' : ''}`} />
                                     <span className="text-sm font-medium">{folderName}</span>
                                     <span className="text-xs text-muted-foreground">{count} item{count !== 1 ? 's' : ''}</span>
+
+                                    {/* Folder Actions */}
+                                    <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                        <button
+                                            onClick={(e) => renameFolder(e, folderPath)}
+                                            className="p-1.5 rounded-lg bg-black/50 hover:bg-white/20 text-gray-400 hover:text-white backdrop-blur-sm transition-all"
+                                            title="Rename folder"
+                                        >
+                                            <Edit2 className="w-3.5 h-3.5" />
+                                        </button>
+                                        <button
+                                            onClick={(e) => deleteFolder(e, folderPath)}
+                                            className="p-1.5 rounded-lg bg-black/50 hover:bg-red-500/30 text-gray-400 hover:text-red-400 backdrop-blur-sm transition-all"
+                                            title="Delete folder"
+                                        >
+                                            <Trash2 className="w-3.5 h-3.5" />
+                                        </button>
+                                    </div>
                                 </div>
                             )
                         })}

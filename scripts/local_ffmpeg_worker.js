@@ -466,7 +466,7 @@ async function processJob(job) {
         // --- 3. Audio Visualizer ---
         // If enabled, generate visualizer from audio and overlay it
         const visConfig = job.visualizer_config;
-        if (visConfig && visConfig.enabled && musicConcat) {
+        if (visConfig && visConfig.enabled && preConcatAudioPath) {
             // Visualize Pipeline: [aout] -> [a_vis] -> filter -> [v_vis_gen]
             // Sanitize color: Use 0x format for FFmpeg
             let visColor = visConfig.color || 'white';

@@ -581,7 +581,7 @@ export default function MusicLibraryPage() {
                 )}
 
                 {/* Music List */}
-                {music.length === 0 ? (
+                {music.length === 0 && visibleFolders.length === 0 ? (
                     <div className="text-center py-16">
                         <Music className="w-16 h-16 text-muted mx-auto mb-4" />
                         <h2 className="text-xl font-semibold text-foreground">No music yet</h2>
