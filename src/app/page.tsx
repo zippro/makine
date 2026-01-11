@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Sparkles, Wand2, Upload, Music, Type, Loader2, GripVertical, X, Plus, AlertCircle, FolderOpen, Video, Settings, Check } from 'lucide-react';
 import { useProject } from '@/context/ProjectContext';
@@ -35,9 +35,8 @@ export default function Home() {
   const [musicLibrary, setMusicLibrary] = useState<MusicTrack[]>([]);
   const [settingsProject, setSettingsProject] = useState<Project | null>(null);
 
-  // Simple Form State
+  // Form State
   const [selectedMusic, setSelectedMusic] = useState<MusicTrack[]>([]);
-  const [selectedAnimation, setSelectedAnimation] = useState<string>('');
   const [title, setTitle] = useState('');
 
   const [isLoading, setIsLoading] = useState(false);
@@ -55,12 +54,10 @@ export default function Home() {
   };
 
   const getSubfolders = (items: any[], currentPath: string) => {
-    // Unique folders that start with currentPath
     const folders = new Set<string>();
     items.forEach(i => {
       const f = i.folder || '/';
       if (f !== currentPath && f.startsWith(currentPath)) {
-        // Extract immediate subfolder
         const rel = f.slice(currentPath.length + (currentPath === '/' ? 0 : 1));
         const firstPart = rel.split('/')[0];
         if (firstPart) folders.add(currentPath === '/' ? `/${firstPart}` : `${currentPath}/${firstPart}`);
@@ -71,11 +68,6 @@ export default function Home() {
 
   const createFolder = async (type: 'music' | 'animation', folderName: string) => {
     if (!currentProject) return;
-    // We don't explicit create folders in DB, we just update files to have that folder path.
-    // But to "show" an empty folder, we might need a dedicated table or just UI trickery.
-    // For now, let's treat folders as virtual. User must upload to a folder.
-    // WAIT, User asked to "open new folder then I will upload".
-    // So we need to switch context to that new (virtual) folder.
     const current = type === 'music' ? currentMusicFolder : currentAnimFolder;
     const newPath = current === '/' ? `/${folderName}` : `${current}/${folderName}`;
     if (type === 'music') setCurrentMusicFolder(newPath);
@@ -108,28 +100,23 @@ export default function Home() {
       const payload: any = {
         project_id: currentProject?.id,
         url: publicUrl,
-        filename: file.name, // Display name
+        filename: file.name,
         folder: folder,
-        // ... other fields based on type
       };
 
       if (type === 'music') {
-        // Audio metadata (mock duration for now or get from client)
         payload.duration_seconds = 0;
         payload.video_usage_count = 0;
       } else {
         payload.duration = 10;
         payload.is_approved = true;
         payload.video_usage_count = 0;
-        // Animation logic usually requires separate image upload? Skipping for simplicity as per "files" request
       }
 
       const { error: dbError } = await supabase.from(table).insert(payload);
       if (dbError) throw dbError;
 
-      // Refresh
-      // We need to re-fetch data. simple way:
-      window.location.reload(); // Brute force refresh for now to see data
+      window.location.reload();
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -137,16 +124,13 @@ export default function Home() {
     }
   };
 
-
-
-  // Load Data - Project Scoped (with backwards compatibility for legacy items)
+  // Load Data
   useEffect(() => {
     if (!currentProject) return;
 
     const fetchData = async () => {
       const supabase = createClient();
 
-      // Get animations: project-scoped OR legacy (null project_id)
       const { data: anims } = await supabase
         .from('animations')
         .select('*, images(*)')
@@ -154,7 +138,6 @@ export default function Home() {
         .or(`project_id.eq.${currentProject.id},project_id.is.null`)
         .order('video_usage_count', { ascending: false });
 
-      // Get music: project-scoped OR legacy (null project_id)  
       const { data: music } = await supabase
         .from('music_library')
         .select('*')
@@ -182,10 +165,6 @@ export default function Home() {
     e.preventDefault();
     setError('');
 
-    /* if (!imageUrl && !imageFile) {
-      setError('Please select an image');
-      return;
-    } */
     if (selectedMusic.length === 0) {
       setError('Please select at least one music track');
       return;
@@ -194,15 +173,13 @@ export default function Home() {
       setError('Please enter a video title');
       return;
     }
-    const mode = (currentProject as any)?.video_mode || 'simple_animation';
-    if (mode === 'simple_animation' && !selectedAnimation && animations.length > 0) {
-      setError('Please select an animation style');
+
+    // Unified Mode Check: Must have assets in playlist
+    if (!((currentProject as any)?.template_assets) || (currentProject as any).template_assets.length === 0) {
+      setError('Playlist is empty. Please add images or animations.');
       return;
     }
-    if (mode !== 'simple_animation' && (!((currentProject as any)?.template_assets) || (currentProject as any).template_assets.length === 0)) {
-      setError('Please add items to the playlist in Project Settings');
-      return;
-    }
+
     if (!currentProject) {
       setError('Please select a project');
       return;
@@ -211,24 +188,16 @@ export default function Home() {
     setIsLoading(true);
 
     try {
-      const supabase = createClient();
-      let finalImageUrl = ''; // No longer manually uploading source images
-
-      // Upload image if file exists
-      // (Removed manual source image upload logic)
-
       const response = await fetch('/api/jobs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          image_url: finalImageUrl,
-          audio_url: selectedMusic[0].url, // Legacy shim?
+          image_url: '',
+          audio_url: selectedMusic[0].url,
           music_ids: selectedMusic.map(m => m.id),
           title_text: title.trim(),
-          animation_id: selectedAnimation || undefined,
           project_id: currentProject.id,
-          // We can construct a simple assets timeline from this if we want to unify backend
-          // But for now, let's keep it simple as requested
+          // Worker will pick up template_assets from project
         }),
       });
 
@@ -250,23 +219,23 @@ export default function Home() {
 
     const supabase = createClient();
     const currentAssets = (currentProject as any).template_assets || [];
-    const existingIndex = currentAssets.findIndex((a: any) => a.url === anim.url);
+    // Check by URL to allow duplicates? No, usually distinct items. 
+    // But for playlist, maybe duplicates allowed? 
+    // AssetPlaylistEditor logic generates new ID for every add.
+    // HERE, we are toggling from picker. 
+    // If we want to allow multiples, "Toggle" is wrong. It should be "Add".
+    // But picker UI usually implies selection state.
+    // Let's treat it as ADD. Always add.
 
-    let newAssets;
-    if (existingIndex >= 0) {
-      // Remove
-      newAssets = [...currentAssets];
-      newAssets.splice(existingIndex, 1);
-    } else {
-      // Add
-      const newAsset = {
-        id: crypto.randomUUID(),
-        type: 'animation',
-        url: anim.url,
-        duration: 10
-      };
-      newAssets = [...currentAssets, newAsset];
-    }
+    const newAsset = {
+      id: crypto.randomUUID(),
+      type: 'animation',
+      url: anim.url,
+      duration: 10,
+      loop_count: (currentProject as any).default_loop_count || 1
+    };
+
+    const newAssets = [...currentAssets, newAsset];
 
     const { data } = await supabase
       .from("projects")
@@ -281,10 +250,8 @@ export default function Home() {
   const addMusic = (track: MusicTrack) => {
     const exists = selectedMusic.find(m => m.id === track.id);
     if (exists) {
-      // Toggle off - remove from selection
       setSelectedMusic(selectedMusic.filter(m => m.id !== track.id));
     } else {
-      // Add to selection
       setSelectedMusic([...selectedMusic, track]);
     }
   };
@@ -323,10 +290,6 @@ export default function Home() {
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
-  const getSelectedAnimationName = () => {
-    return animations.find(a => a.id === selectedAnimation)?.images?.filename || 'Select Animation';
-  }
-
   return (
     <div className="min-h-screen bg-background">
       {/* Hero Section */}
@@ -342,11 +305,9 @@ export default function Home() {
             </h1>
           </div>
 
-          {/* Project Selection or Create Form */}
           {!currentProject ? (
             <div className="space-y-8">
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {/* Create New Project Card */}
                 <button
                   onClick={async () => {
                     const name = prompt('Enter project name:');
@@ -361,7 +322,6 @@ export default function Home() {
                   <p className="text-sm text-muted">Start a new video project</p>
                 </button>
 
-                {/* Existing Projects */}
                 {projects.map((project) => (
                   <button
                     key={project.id}
@@ -405,46 +365,24 @@ export default function Home() {
             <>
               <form onSubmit={handleSubmit} className="space-y-6">
                 <div className="grid grid-cols-1 gap-6">
-                  {/* Animation Selection (Conditional) */}
+                  {/* Playlist Editor (Always Visible for Unified Mode) */}
                   <div className="p-6 rounded-2xl bg-card border border-border">
                     <div className="flex items-center justify-between mb-4">
                       <h2 className="text-xl font-semibold flex items-center gap-2">
                         <Video className="w-5 h-5 text-primary" />
-                        {(currentProject as any)?.video_mode === 'image_slideshow'
-                          ? 'Image Slideshow'
-                          : (currentProject as any)?.video_mode === 'multi_animation'
-                            ? 'Animation Sequence'
-                            : 'Animation Style'}
+                        Visual Assets
                       </h2>
                     </div>
 
-                    {/* Simple Mode: Picker */}
-                    {(!(currentProject as any)?.video_mode || (currentProject as any)?.video_mode === 'simple_animation') && (
-                      <button
-                        type="button"
-                        onClick={() => setShowAnimationPicker(true)}
-                        className="w-full p-4 rounded-xl bg-background border border-border hover:border-primary transition-all text-left flex items-center justify-between"
-                      >
-                        <span className={selectedAnimation ? "text-foreground" : "text-muted"}>
-                          {getSelectedAnimationName()}
-                        </span>
-                        <span className="text-primary text-sm">Change</span>
-                      </button>
-                    )}
-
-                    {/* Multi/Slideshow Mode: Playlist Editor */}
-                    {(currentProject as any)?.video_mode && (currentProject as any)?.video_mode !== 'simple_animation' && (
-                      <div className="mt-4">
-                        <AssetPlaylistEditor
-                          project={currentProject}
-                          onUpdate={(updated) => {
-                            // We need to update the local project state
-                            refreshProjects();
-                          }}
-                          onAddAnimation={() => setShowAnimationPicker(true)}
-                        />
-                      </div>
-                    )}
+                    <div className="mt-4">
+                      <AssetPlaylistEditor
+                        project={currentProject}
+                        onUpdate={(updated) => {
+                          refreshProjects();
+                        }}
+                        onAddAnimation={() => setShowAnimationPicker(true)}
+                      />
+                    </div>
                   </div>
                 </div>
 
@@ -551,14 +489,6 @@ export default function Home() {
             <div className="p-4 border-b border-border flex items-center justify-between">
               <div className="flex items-center gap-2 overflow-hidden">
                 <h2 className="text-lg font-semibold text-foreground whitespace-nowrap">Select Animation</h2>
-                {/* Show selected count and total duration for multi-mode */}
-                {((currentProject as any)?.video_mode && (currentProject as any)?.video_mode !== 'simple_animation') && (
-                  <span className="text-sm text-primary font-medium whitespace-nowrap">
-                    ({((currentProject as any)?.template_assets || []).length} selected, {
-                      Math.round(((currentProject as any)?.template_assets || []).reduce((sum: number, a: any) => sum + (a.duration || 0), 0))
-                    }s total)
-                  </span>
-                )}
                 <div className="flex items-center gap-1 text-muted-foreground text-sm overflow-hidden text-ellipsis">
                   <span className="mx-1">/</span>
                   {currentAnimFolder !== '/' && (
@@ -594,19 +524,8 @@ export default function Home() {
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
                 {/* Folders */}
                 {(() => {
-                  // Logic to sort folders by most recent item
                   const subfolders = getSubfolders(animations, currentAnimFolder);
-                  return subfolders.sort((a, b) => {
-                    // Find latest item in folder A
-                    const aItems = animations.filter(i => (i.folder || '/').startsWith(a));
-                    const aLatest = aItems.reduce((max, i) => (i.created_at || '') > max ? (i.created_at || '') : max, '');
-
-                    // Find latest item in folder B
-                    const bItems = animations.filter(i => (i.folder || '/').startsWith(b));
-                    const bLatest = bItems.reduce((max, i) => (i.created_at || '') > max ? (i.created_at || '') : max, '');
-
-                    return bLatest.localeCompare(aLatest); // Descending
-                  }).map(folderPath => {
+                  return subfolders.sort().map(folderPath => {
                     const folderName = folderPath.split('/').pop();
                     return (
                       <button key={folderPath} onDoubleClick={() => setCurrentAnimFolder(folderPath)} className="group rounded-xl border-2 border-border border-dashed p-4 flex flex-col items-center justify-center gap-3 hover:border-primary/50 hover:bg-primary/5 transition-all">
@@ -619,27 +538,11 @@ export default function Home() {
 
                 {/* Files */}
                 {getFolderContents(animations, currentAnimFolder).map((anim) => {
-                  const mode = (currentProject as any)?.video_mode;
-                  const isMulti = mode && mode !== 'simple_animation';
-                  const isSelected = isMulti
-                    ? ((currentProject as any)?.template_assets || []).some((a: any) => a.url === anim.url)
-                    : selectedAnimation === anim.id;
-
                   return (
                     <button
                       key={anim.id}
-                      onClick={() => {
-                        if (!mode || mode === 'simple_animation') {
-                          setSelectedAnimation(anim.id);
-                          setShowAnimationPicker(false);
-                        } else {
-                          toggleAssetInPlaylist(anim);
-                          // Don't close modal in multi-mode
-                        }
-                      }}
-                      className={`group rounded-xl overflow-hidden border-2 transition-all relative ${isSelected
-                        ? 'border-primary ring-2 ring-primary/20 scale-[0.98]'
-                        : 'border-border hover:border-primary'}`}
+                      onClick={() => toggleAssetInPlaylist(anim)}
+                      className={`group rounded-xl overflow-hidden border-2 transition-all relative border-border hover:border-primary`}
                     >
                       <div className="aspect-video bg-black relative">
                         <video
@@ -655,34 +558,16 @@ export default function Home() {
                             e.currentTarget.currentTime = 0;
                           }}
                         />
-
-                        {/* Selected Checkmark Overlay */}
-                        {isSelected && (
-                          <div className="absolute inset-0 bg-primary/20 backdrop-blur-[1px] flex items-center justify-center">
-                            <div className="bg-primary text-black p-2 rounded-full shadow-lg scale-100 animate-in fade-in zoom-in duration-200">
-                              <Check className="w-6 h-6" />
-                            </div>
-                          </div>
-                        )}
                       </div>
                       <div className="p-2 bg-card text-left">
                         <p className="text-sm font-medium truncate">{anim.images?.filename || 'Animation'}</p>
                       </div>
 
-                      {/* Duration & Usage Count Badge */}
-                      {!isSelected && (
-                        <div className="absolute top-2 right-2 flex gap-1">
-                          {/* Duration Badge */}
-                          <div className="bg-black/60 text-white text-xs px-2 py-1 rounded-full backdrop-blur-sm">
-                            {Math.round(anim.duration || 0)}s
-                          </div>
-                          {/* Usage Count Badge */}
-                          <div className="bg-black/60 text-white text-xs px-2 py-1 rounded-full flex items-center gap-1 backdrop-blur-sm">
-                            <Video className="w-3 h-3" />
-                            {anim.video_usage_count || 0}
-                          </div>
+                      <div className="absolute top-2 right-2 flex gap-1">
+                        <div className="bg-black/60 text-white text-xs px-2 py-1 rounded-full backdrop-blur-sm">
+                          {Math.round(anim.duration || 0)}s
                         </div>
-                      )}
+                      </div>
                     </button>
                   );
                 })}
@@ -692,7 +577,7 @@ export default function Home() {
         </div>
       )}
 
-      {/* Music Picker Modal (Multi-Select) */}
+      {/* Music Picker Modal */}
       {showMusicPicker && (
         <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
           <div className="bg-card rounded-2xl max-w-2xl w-full max-h-[80vh] overflow-hidden flex flex-col">
@@ -734,7 +619,6 @@ export default function Home() {
             </div>
             <div className="p-4 overflow-y-auto flex-1">
               <div className="space-y-2">
-                {/* Folders */}
                 {getSubfolders(musicLibrary, currentMusicFolder).map(folderPath => {
                   const folderName = folderPath.split('/').pop();
                   return (
@@ -745,7 +629,6 @@ export default function Home() {
                   )
                 })}
 
-                {/* Files */}
                 {getFolderContents(musicLibrary, currentMusicFolder).map((track) => {
                   const isSelected = !!selectedMusic.find(m => m.id === track.id);
                   return (
@@ -790,7 +673,6 @@ export default function Home() {
         </div>
       )}
 
-      {/* Settings Modal */}
       {settingsProject && (
         <ProjectConfigModal
           project={settingsProject}

@@ -58,8 +58,14 @@ export interface Project {
     position: 'bottom' | 'top';
   };
   default_loop_count?: number; // New: Global loop count for animations
+  default_image_duration?: number; // New: Global duration for images
   channel_info?: string; // New: AI Context
   keywords?: string; // New: AI Context
+  animation_prompts?: {
+    id: string;
+    name: string;
+    prompt: string;
+  }[];
 }
 
 export interface VideoJob {

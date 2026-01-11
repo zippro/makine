@@ -4,6 +4,7 @@ import { useState, useCallback, useEffect } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import ImageUploader from '@/components/ImageUploader';
 import AnimationDurationSelect from '@/components/AnimationDurationSelect';
+import AnimationTypeSelect from '@/components/AnimationTypeSelect';
 import UploadProgress, { UploadStatus } from '@/components/UploadProgress';
 import { useProject } from '@/context/ProjectContext';
 import { MoveAssetModal } from '@/components/MoveAssetModal';
@@ -12,6 +13,7 @@ import { Folder, Edit2, Trash2 } from 'lucide-react';
 export default function UploadImagesPage() {
     const { currentProject } = useProject();
     const [duration, setDuration] = useState<5 | 10>(10);
+    const [selectedTypeId, setSelectedTypeId] = useState<string>('loop');
     const [uploading, setUploading] = useState(false);
     const [progress, setProgress] = useState<UploadStatus[]>([]);
     const [error, setError] = useState<string | null>(null);
@@ -274,9 +276,10 @@ export default function UploadImagesPage() {
                         animation_id: animation.id,
                         image_url: publicUrl,
                         duration: duration,
-                        prompt: item.prompt
+                        prompt: item.prompt,
+                        animation_prompt: currentProject.animation_prompts?.find(p => p.id === selectedTypeId)?.prompt || ''
                     }),
-                }).catch(err => console.error('Webhook trigger error:', err));
+                }).catch((err: any) => console.error('Webhook trigger error:', err));
 
                 // Immediately set to done (queued)
                 setProgress(prev => prev.map(p =>
@@ -503,6 +506,10 @@ export default function UploadImagesPage() {
                             <AnimationDurationSelect
                                 value={duration}
                                 onChange={setDuration}
+                            />
+                            <AnimationTypeSelect
+                                value={selectedTypeId}
+                                onChange={setSelectedTypeId}
                             />
                         </div>
 

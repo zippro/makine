@@ -1,8 +1,7 @@
-
 "use client";
 
 import { useState, useEffect } from "react";
-import { Trash2, Plus, X, Save, AlertCircle, Loader2, GripVertical, Settings, Play, List, Layers, Youtube, ChevronUp, ChevronDown, Type, Upload, ImageIcon, Music } from 'lucide-react';
+import { Trash2, Plus, X, Save, AlertCircle, Loader2, Settings, Type, Upload, ImageIcon, Music, Layers, Youtube, Clock, Repeat } from 'lucide-react';
 import { useEscapeKey } from '@/hooks/useEscapeKey';
 import { Project } from "@/lib/types";
 import { createClient } from "@/lib/supabase/client";
@@ -14,15 +13,7 @@ interface ProjectConfigModalProps {
     onUpdate: (updatedProject: Project) => void;
 }
 
-type Tab = 'general' | 'mode' | 'overlays';
-
-interface TemplateAsset {
-    id: string;
-    type: 'animation' | 'image';
-    url: string;
-    duration: number;
-    loop_count?: number;
-}
+type Tab = 'general' | 'settings' | 'overlays' | 'templates';
 
 interface OverlayImage {
     id: string;
@@ -57,7 +48,7 @@ interface OverlayConfig {
 
 export function ProjectConfigModal({ project, isOpen, onClose, onUpdate }: ProjectConfigModalProps) {
     useEscapeKey(onClose);
-    const [activeTab, setActiveTab] = useState<Tab>('mode');
+    const [activeTab, setActiveTab] = useState<Tab>('settings');
 
     // Youtube State
     const [clientId, setClientId] = useState("");
@@ -67,9 +58,9 @@ export function ProjectConfigModal({ project, isOpen, onClose, onUpdate }: Proje
     const [keywords, setKeywords] = useState("");
 
     // Config State
-    const [videoMode, setVideoMode] = useState<string>("simple_animation");
-    const [templateAssets, setTemplateAssets] = useState<TemplateAsset[]>([]);
     const [defaultLoopCount, setDefaultLoopCount] = useState<number>(1);
+    const [defaultImageDuration, setDefaultImageDuration] = useState<number>(15);
+
     const [overlayConfig, setOverlayConfig] = useState<OverlayConfig>({
         images: [],
         title: { enabled: true, start_time: 0, duration: 5, position: "center", font: "Arial", fade_duration: 1 }
@@ -81,6 +72,15 @@ export function ProjectConfigModal({ project, isOpen, onClose, onUpdate }: Proje
         position: 'bottom'
     });
     const [projectFonts, setProjectFonts] = useState<any[]>([]);
+
+    // Animation Prompts State
+    const [animationPrompts, setAnimationPrompts] = useState<{ id: string; name: string; prompt: string }[]>([
+        {
+            id: 'loop',
+            name: 'Seamless Loop',
+            prompt: "Look at this image. Write a single prompt for Kling AI to generate a SEAMLESS LOOP animation based on this image.\n\nUSER CONTEXT: {{user_prompt}}\n\nCRITICAL REQUIREMENTS:\n1. **Loop**: The animation must be a consecutive loop (start frame = end frame).\n2. **Camera**: STATIC CAMERA ONLY. No pan, no zoom, no tilt.\n3. **Motion**: Only small, internal effects (wind, fog, water flow, breathing).\n4. **Output**: A single comma-separated string suitable for image-to-video generation.\n\nAnalyze the subject and depth. Describe the scene and specify subtle motions."
+        }
+    ]);
 
     // UI State
     const [isLoading, setIsLoading] = useState(false);
@@ -100,10 +100,9 @@ export function ProjectConfigModal({ project, isOpen, onClose, onUpdate }: Proje
             setChannelInfo((project as any).channel_info || "");
             setKeywords((project as any).keywords || "");
 
-            // Settings (Fallbacks handled)
-            setVideoMode((project as any).video_mode || "simple_animation");
-            setTemplateAssets((project as any).template_assets || []);
+            // Settings
             setDefaultLoopCount((project as any).default_loop_count || 1);
+            setDefaultImageDuration((project as any).default_image_duration || 15);
 
             const defaultOverlay: OverlayConfig = {
                 images: [],
@@ -113,10 +112,15 @@ export function ProjectConfigModal({ project, isOpen, onClose, onUpdate }: Proje
             setVisualizerConfig((project as any).visualizer_config || { enabled: false, style: 'bar', color: '#ffffff', position: 'bottom' });
 
             // Fetch Fonts
-            fetch(`/ api / fonts ? projectId = ${project.id} `)
+            fetch(`/api/fonts?projectId=${project.id}`)
                 .then(res => res.json())
                 .then(data => { if (Array.isArray(data)) setProjectFonts(data); })
+                .then(data => { if (Array.isArray(data)) setProjectFonts(data); })
                 .catch(console.error);
+
+            if (project.animation_prompts && project.animation_prompts.length > 0) {
+                setAnimationPrompts(project.animation_prompts);
+            }
         }
     }, [isOpen, project]);
 
@@ -131,13 +135,17 @@ export function ProjectConfigModal({ project, isOpen, onClose, onUpdate }: Proje
 
             // Prepare Update Payload
             const updates: any = {
-                video_mode: videoMode,
-                template_assets: templateAssets,
+                // Force playlist mode as requested by "Just 1 mode"
+                video_mode: 'multi_animation',
+
                 overlay_config: overlayConfig,
                 visualizer_config: visualizerConfig,
                 default_loop_count: defaultLoopCount,
+                default_image_duration: defaultImageDuration,
                 channel_info: channelInfo,
-                keywords: keywords
+
+                keywords: keywords,
+                animation_prompts: animationPrompts
             };
 
             // Only update credentials if inputs are touched/valid
@@ -175,6 +183,7 @@ export function ProjectConfigModal({ project, isOpen, onClose, onUpdate }: Proje
     // Asset Helpers
     // Local state for inputs to prevent cursor jumping/validation locking
     const [localLoopCount, setLocalLoopCount] = useState<string>((project.default_loop_count || 1).toString());
+    const [localImageDuration, setLocalImageDuration] = useState<string>((project.default_image_duration || 15).toString());
     const [localTitleFontSize, setLocalTitleFontSize] = useState<string>((overlayConfig.title?.fontSize || 60).toString());
 
     // Sync local state when props change (external updates)
@@ -183,39 +192,12 @@ export function ProjectConfigModal({ project, isOpen, onClose, onUpdate }: Proje
     }, [defaultLoopCount]);
 
     useEffect(() => {
+        setLocalImageDuration((defaultImageDuration || 15).toString());
+    }, [defaultImageDuration]);
+
+    useEffect(() => {
         setLocalTitleFontSize((overlayConfig.title?.fontSize || 60).toString());
     }, [overlayConfig.title?.fontSize]);
-
-    const addAsset = () => {
-        const newAsset: TemplateAsset = {
-            id: crypto.randomUUID(),
-            type: videoMode === 'image_slideshow' ? 'image' : 'animation',
-            url: "",
-            duration: 10
-        };
-        setTemplateAssets([...templateAssets, newAsset]);
-    };
-
-    const removeAsset = (index: number) => {
-        const newAssets = [...templateAssets];
-        newAssets.splice(index, 1);
-        setTemplateAssets(newAssets);
-    };
-
-    const moveAsset = (fromIndex: number, direction: 'up' | 'down') => {
-        const toIndex = direction === 'up' ? fromIndex - 1 : fromIndex + 1;
-        if (toIndex < 0 || toIndex >= templateAssets.length) return;
-        const newAssets = [...templateAssets];
-        const item = newAssets.splice(fromIndex, 1)[0];
-        newAssets.splice(toIndex, 0, item);
-        setTemplateAssets(newAssets);
-    };
-
-    const updateAsset = (index: number, field: keyof TemplateAsset, value: any) => {
-        const newAssets = [...templateAssets];
-        (newAssets[index] as any)[field] = value;
-        setTemplateAssets(newAssets);
-    };
 
     // Overlay Image Helpers
     const addOverlayImage = () => {
@@ -262,14 +244,15 @@ export function ProjectConfigModal({ project, isOpen, onClose, onUpdate }: Proje
                     {/* Sidebar Tabs */}
                     <div className="w-56 border-r border-border bg-muted/10 p-3 space-y-1 overflow-y-auto">
                         {[
-                            { id: 'mode' as Tab, icon: Play, label: 'Video Mode' },
+                            { id: 'settings' as Tab, icon: Settings, label: 'Defaults' },
+                            { id: 'templates' as Tab, icon: Type, label: 'Anim. Types' },
                             { id: 'overlays' as Tab, icon: Layers, label: 'Overlays' },
                             { id: 'general' as Tab, icon: Youtube, label: 'YouTube' },
                         ].map((tab) => (
                             <button
                                 key={tab.id}
                                 onClick={() => setActiveTab(tab.id)}
-                                className={`w - full flex items - center gap - 3 p - 3 rounded - xl text - left transition - colors ${activeTab === tab.id ? 'bg-primary/10 text-primary border border-primary/20' : 'hover:bg-white/5 text-muted hover:text-foreground'} `}
+                                className={`w-full flex items-center gap-3 p-3 rounded-xl text-left transition-colors ${activeTab === tab.id ? 'bg-primary/10 text-primary border border-primary/20' : 'hover:bg-white/5 text-muted hover:text-foreground'}`}
                             >
                                 <tab.icon className="w-5 h-5" />
                                 <span className="font-medium">{tab.label}</span>
@@ -282,7 +265,7 @@ export function ProjectConfigModal({ project, isOpen, onClose, onUpdate }: Proje
                         {/* GENERAL TAB */}
                         {activeTab === 'general' && (
                             <div className="space-y-6 max-w-xl">
-                                <h3 className="text-lg font-semibold border-b border-border pb-2">channel & Content (AI)</h3>
+                                <h3 className="text-lg font-semibold border-b border-border pb-2">Channel & Content (AI)</h3>
                                 <div className="space-y-4 mb-8">
                                     <div>
                                         <label className="text-sm font-medium block mb-1.5">Channel Info / Style</label>
@@ -342,47 +325,30 @@ export function ProjectConfigModal({ project, isOpen, onClose, onUpdate }: Proje
                             </div>
                         )}
 
-                        {/* MODE TAB */}
-                        {activeTab === 'mode' && (
+                        {/* SETTINGS TAB (Was MODE) */}
+                        {activeTab === 'settings' && (
                             <div className="space-y-6 max-w-xl">
-                                <h3 className="text-lg font-semibold border-b border-border pb-2">Video Generation Mode</h3>
-                                <div className="space-y-3">
-                                    {[
-                                        { id: 'simple_animation', label: 'Single Animation Loop', desc: 'Choose one animation per video. It loops for the full music duration.' },
-                                        { id: 'multi_animation', label: 'Multi-Animation Sequence', desc: 'Create a playlist of animations with custom durations. Loops the sequence.' },
-                                        { id: 'image_slideshow', label: 'Image Slideshow', desc: 'Create a playlist of images with custom durations. Loops the sequence.' },
-                                    ].map((mode) => (
-                                        <button
-                                            key={mode.id}
-                                            type="button"
-                                            onClick={() => setVideoMode(mode.id)}
-                                            className={`w - full flex items - start gap - 4 p - 4 rounded - xl text - left border - 2 transition - all ${videoMode === mode.id ? 'border-primary bg-primary/5' : 'border-border hover:border-primary/50 bg-card'} `}
-                                        >
-                                            <div className={`mt - 0.5 w - 5 h - 5 rounded - full border - 2 flex items - center justify - center flex - shrink - 0 ${videoMode === mode.id ? 'border-primary' : 'border-muted'} `}>
-                                                {videoMode === mode.id && <div className="w-2.5 h-2.5 rounded-full bg-primary" />}
-                                            </div>
-                                            <div>
-                                                <p className="font-semibold text-foreground">{mode.label}</p>
-                                                <p className="text-sm text-muted mt-0.5">{mode.desc}</p>
-                                            </div>
-                                        </button>
-                                    ))}
-                                </div>
+                                <h3 className="text-lg font-semibold border-b border-border pb-2">Project Defaults</h3>
 
-                                {/* Global Loop Count Setting */}
-                                {videoMode !== 'simple_animation' && (
-                                    <div className="pt-4 border-t border-border mt-4">
-                                        <label className="text-sm font-medium mb-1 block">Animation Loop Count (Standard)</label>
-                                        <p className="text-xs text-muted mb-2">Each animation in the playlist will loop this many times.</p>
+                                <div className="p-4 bg-card border border-border rounded-xl space-y-6">
+
+                                    {/* Animation Loop Count */}
+                                    <div>
+                                        <label className="text-sm font-medium mb-1 flex items-center gap-2">
+                                            <Repeat className="w-4 h-4 text-primary" />
+                                            Default Animation Loop Count
+                                        </label>
+                                        <p className="text-xs text-muted mb-3">
+                                            Each animation added to the playlist will loop this many times by default.
+                                            (e.g. 2 means A, A, B, B...)
+                                        </p>
                                         <div className="flex items-center gap-3">
                                             <input
                                                 type="number"
                                                 value={localLoopCount}
                                                 onChange={(e) => {
                                                     const val = e.target.value;
-                                                    setLocalLoopCount(val); // Always update local state
-
-                                                    // Only update parent if valid
+                                                    setLocalLoopCount(val);
                                                     const num = parseInt(val);
                                                     if (!isNaN(num) && num >= 1) {
                                                         setDefaultLoopCount(num);
@@ -395,7 +361,47 @@ export function ProjectConfigModal({ project, isOpen, onClose, onUpdate }: Proje
                                             <span className="text-sm text-muted">times per asset</span>
                                         </div>
                                     </div>
-                                )}
+
+                                    <div className="border-t border-border" />
+
+                                    {/* Image Duration */}
+                                    <div>
+                                        <label className="text-sm font-medium mb-1 flex items-center gap-2">
+                                            <Clock className="w-4 h-4 text-primary" />
+                                            Default Image Duration
+                                        </label>
+                                        <p className="text-xs text-muted mb-3">
+                                            Each image added to the playlist will appear for this many seconds by default.
+                                        </p>
+                                        <div className="flex items-center gap-3">
+                                            <input
+                                                type="number"
+                                                value={localImageDuration}
+                                                onChange={(e) => {
+                                                    const val = e.target.value;
+                                                    setLocalImageDuration(val);
+                                                    const num = parseFloat(val);
+                                                    if (!isNaN(num) && num >= 1) {
+                                                        setDefaultImageDuration(num);
+                                                    }
+                                                }}
+                                                className="w-24 bg-background border border-border rounded px-3 py-2 text-sm focus:ring-2 focus:ring-primary/20 outline-none"
+                                                min="1"
+                                                step="0.5"
+                                                placeholder="15"
+                                            />
+                                            <span className="text-sm text-muted">seconds</span>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="bg-primary/5 p-4 rounded-xl border border-primary/10">
+                                    <h4 className="font-semibold text-primary mb-1">Unified Mode</h4>
+                                    <p className="text-xs text-muted-foreground">
+                                        This project is set to Unified Mode. You can add both images and animations to the playlist on the homepage.
+                                        The settings above define default values for new items. You can still edit individual items in the playlist.
+                                    </p>
+                                </div>
                             </div>
                         )}
 
@@ -501,7 +507,7 @@ export function ProjectConfigModal({ project, isOpen, onClose, onUpdate }: Proje
                                                                     if (!confirm('Delete this font?')) return;
                                                                     const font = projectFonts.find(f => f.name === overlayConfig.title.font);
                                                                     if (font) {
-                                                                        await fetch(`/ api / fonts ? id = ${font.id} `, { method: 'DELETE' });
+                                                                        await fetch(`/api/fonts?id=${font.id}`, { method: 'DELETE' });
                                                                         setProjectFonts(prev => prev.filter(p => p.id !== font.id));
                                                                         setOverlayConfig({
                                                                             ...overlayConfig,
@@ -531,17 +537,15 @@ export function ProjectConfigModal({ project, isOpen, onClose, onUpdate }: Proje
                                                                     }
 
                                                                     try {
-                                                                        // 1. Upload
                                                                         const supabase = createClient();
                                                                         const fileExt = file.name.split('.').pop();
-                                                                        const fileName = `fonts / ${Date.now()} -${Math.random().toString(36).substring(7)}.${fileExt} `;
+                                                                        const fileName = `fonts/${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
 
-                                                                        // Try 'assets' bucket first, fallback to 'uploads'
                                                                         let bucket = 'assets';
                                                                         let { error: upErr } = await supabase.storage.from(bucket).upload(fileName, file);
 
                                                                         if (upErr && (upErr.message.includes('not found') || (upErr as any).statusCode === 404)) {
-                                                                            bucket = 'uploads'; // Fallback
+                                                                            bucket = 'uploads';
                                                                             const { error: upErr2 } = await supabase.storage.from(bucket).upload(fileName, file);
                                                                             if (upErr2) throw upErr2;
                                                                         } else if (upErr) {
@@ -550,8 +554,7 @@ export function ProjectConfigModal({ project, isOpen, onClose, onUpdate }: Proje
 
                                                                         const { data: { publicUrl } } = supabase.storage.from(bucket).getPublicUrl(fileName);
 
-                                                                        // 2. Register
-                                                                        const fontName = file.name.replace(/\.[^/.]+$/, ""); // remove extension
+                                                                        const fontName = file.name.replace(/\.[^/.]+$/, "");
                                                                         const res = await fetch('/api/fonts', {
                                                                             method: 'POST',
                                                                             headers: { 'Content-Type': 'application/json' },
@@ -573,7 +576,7 @@ export function ProjectConfigModal({ project, isOpen, onClose, onUpdate }: Proje
 
                                                                     } catch (err: any) {
                                                                         console.error('Font upload failed', err);
-                                                                        alert(`Failed to upload font: ${err.message} `);
+                                                                        alert(`Failed to upload font: ${err.message}`);
                                                                     }
                                                                 }}
                                                             />
@@ -602,42 +605,7 @@ export function ProjectConfigModal({ project, isOpen, onClose, onUpdate }: Proje
                                                         />
                                                     </div>
                                                 </div>
-                                                <div>
-                                                    <label className="text-xs text-muted block mb-1">Style</label>
-                                                    <select
-                                                        value={(overlayConfig.title as any).style || 'standard'}
-                                                        onChange={(e) => setOverlayConfig({
-                                                            ...overlayConfig,
-                                                            title: { ...overlayConfig.title, style: e.target.value } as any
-                                                        })}
-                                                        className="w-full bg-background border border-border rounded px-3 py-2 text-sm"
-                                                    >
-                                                        <option value="standard">Standard (Shadow)</option>
-                                                        <option value="boxed">Boxed (Background)</option>
-                                                        <option value="neon">Neon Glow</option>
-                                                        <option value="outline">Strong Outline</option>
-                                                        <option value="clean">Clean (No Border)</option>
-                                                    </select>
-                                                </div>
-                                                <div>
-                                                    <label className="text-xs text-muted block mb-1">Position</label>
-                                                    <select
-                                                        value={overlayConfig.title?.position || 'center'}
-                                                        onChange={(e) => setOverlayConfig({
-                                                            ...overlayConfig,
-                                                            title: { ...overlayConfig.title, position: e.target.value }
-                                                        })}
-                                                        className="w-full bg-background border border-border rounded px-3 py-2 text-sm"
-                                                    >
-                                                        <option value="center">Center</option>
-                                                        <option value="top">Top</option>
-                                                        <option value="bottom">Bottom</option>
-                                                        <option value="top_left">Top Left</option>
-                                                        <option value="top_right">Top Right</option>
-                                                        <option value="bottom_left">Bottom Left</option>
-                                                        <option value="bottom_right">Bottom Right</option>
-                                                    </select>
-                                                </div>
+                                                {/* Styles and Position removed to enforce Modern look */}
                                             </div>
                                         )}
                                     </div>
@@ -693,7 +661,6 @@ export function ProjectConfigModal({ project, isOpen, onClose, onUpdate }: Proje
                                                                         formData.append('file', file);
                                                                         formData.append('project_id', project.id);
 
-                                                                        // Use our proxy API which uploads to Hetzner and registers the image
                                                                         const res = await fetch('/api/upload', {
                                                                             method: 'POST',
                                                                             body: formData
@@ -793,20 +760,7 @@ export function ProjectConfigModal({ project, isOpen, onClose, onUpdate }: Proje
 
                                         {visualizerConfig.enabled && (
                                             <div className="grid grid-cols-2 gap-4 pt-2">
-                                                <div>
-                                                    <label className="text-xs text-muted block mb-1">Style</label>
-                                                    <select
-                                                        value={visualizerConfig.style}
-                                                        onChange={(e) => setVisualizerConfig({ ...visualizerConfig, style: e.target.value as any })}
-                                                        className="w-full bg-background border border-border rounded px-3 py-2 text-sm"
-                                                    >
-                                                        <option value="bar">Bar (Classic)</option>
-                                                        <option value="line">Line (Simple)</option>
-                                                        <option value="wave">Waveform (Smooth)</option>
-                                                        <option value="spectrum">Spectrum (Frequency)</option>
-                                                        <option value="round">Circular (Stereo)</option>
-                                                    </select>
-                                                </div>
+                                                {/* Visualizer Style selector removed - Enforcing Modern Clean Bar */}
                                                 <div>
                                                     <label className="text-xs text-muted block mb-1">Color</label>
                                                     <input
@@ -830,6 +784,81 @@ export function ProjectConfigModal({ project, isOpen, onClose, onUpdate }: Proje
                                             </div>
                                         )}
                                     </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* TEMPLATES TAB */}
+                        {activeTab === 'templates' && (
+                            <div className="space-y-6 max-w-2xl">
+                                <div className="flex items-center justify-between border-b border-border pb-2">
+                                    <h3 className="text-lg font-semibold">Animation Types</h3>
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setAnimationPrompts([...animationPrompts, {
+                                                id: crypto.randomUUID(),
+                                                name: 'New Type',
+                                                prompt: 'Write a prompt for...'
+                                            }]);
+                                        }}
+                                        className="px-3 py-1.5 bg-primary/10 text-primary rounded-lg text-sm font-medium hover:bg-primary/20 flex items-center gap-1"
+                                    >
+                                        <Plus className="w-4 h-4" /> Add Type
+                                    </button>
+                                </div>
+
+                                <div className="space-y-4">
+                                    {animationPrompts.map((prompt, index) => (
+                                        <div key={prompt.id} className="p-4 bg-card border border-border rounded-xl space-y-3">
+                                            <div className="flex items-center gap-3">
+                                                <input
+                                                    type="text"
+                                                    value={prompt.name}
+                                                    onChange={(e) => {
+                                                        const newPrompts = [...animationPrompts];
+                                                        newPrompts[index].name = e.target.value;
+                                                        setAnimationPrompts(newPrompts);
+                                                    }}
+                                                    className="font-medium bg-transparent border-none focus:ring-0 p-0 text-foreground w-full"
+                                                    placeholder="Type Name (e.g. Zoom In)"
+                                                />
+                                                <button
+                                                    type="button"
+                                                    onClick={() => {
+                                                        if (!confirm('Delete this animation type?')) return;
+                                                        const newPrompts = [...animationPrompts];
+                                                        newPrompts.splice(index, 1);
+                                                        setAnimationPrompts(newPrompts);
+                                                    }}
+                                                    className="text-muted hover:text-red-500"
+                                                >
+                                                    <Trash2 className="w-4 h-4" />
+                                                </button>
+                                            </div>
+                                            <div>
+                                                <label className="text-xs text-muted block mb-1">System Prompt Template</label>
+                                                <textarea
+                                                    value={prompt.prompt}
+                                                    onChange={(e) => {
+                                                        const newPrompts = [...animationPrompts];
+                                                        newPrompts[index].prompt = e.target.value;
+                                                        setAnimationPrompts(newPrompts);
+                                                    }}
+                                                    className="w-full h-32 bg-background border border-border rounded-lg px-3 py-2 text-sm font-mono focus:ring-2 focus:ring-primary/20 outline-none resize-none"
+                                                    placeholder="Enter system prompt for AI..."
+                                                />
+                                                <p className="text-xs text-muted mt-1">
+                                                    Use <code>{"{{user_prompt}}"}</code> to insert the user's input from the upload page.
+                                                </p>
+                                            </div>
+                                        </div>
+                                    ))}
+                                    {animationPrompts.length === 0 && (
+                                        <div className="text-center py-8 text-muted text-sm border-2 border-dashed border-border rounded-xl">
+                                            No animation types defined. Add one to customize generation styles.
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                         )}

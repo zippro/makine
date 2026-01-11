@@ -481,7 +481,7 @@ async function processJob(job) {
             const visW = width;
 
             // Split audio
-            filterComplex += `[aout]asplit[a_vis][a_final];`;
+            filterComplex += `[1:a]asplit[a_vis][a_final];`;
             audioOutputLabel = '[a_final]';
 
             const visLabel = '[v_vis_gen]';
@@ -489,43 +489,17 @@ async function processJob(job) {
             // STYLES
             let visFilter = '';
 
-            if (visConfig.style === 'spectrum') {
-                // Spectrum (showcqt) - User Reference Style
-                // Height constrained to 150px (approx 15% of 1080p) to avoid cutting video
-                // bar_g=4 (gaps), full width
-                // basefreq=40:endfreq=15000 (spreads bars better than default)
-                visFilter = `showcqt=s=${visW}x150:fps=30:bar_g=4:axis=0:sono_h=0:count=60:fscale=log:basefreq=40:endfreq=15000`;
-            } else if (visConfig.style === 'wave') {
-                // Waveform - Smooth Line
-                visFilter = `showwaves=s=${visW}x${visH}:mode=line:colors=${visColor}:rate=30`;
-            } else if (visConfig.style === 'round') {
+            if (visConfig.style === 'round') {
                 // Circular (avectorscope)
                 const dim = 500;
                 visFilter = `avectorscope=s=${dim}x${dim}:rate=30:zoom=3:rc=255:gc=200:bc=200:draw=line`;
-                // We might need to pad it to full width if we overlay simply
-            } else if (visConfig.style === 'line') {
-                // Simple Line (showfreqs)
-                visFilter = `showfreqs=s=${visW}x${visH}:mode=line:colors=${visColor}:ascale=sqrt`;
-            } else {
-                // Bar (Default)
-                // Use log scale for better visibility of lower volume
-                visFilter = `showfreqs=s=${visW}x${visH}:mode=bar:colors=${visColor}:ascale=log`;
-            }
-
-            // Apply filter
-            // format=rgba ensures alpha channel if filter supports it (showwaves does)
-            if (visConfig.style === 'round') {
-                // Special handling for round: it creates a square video. We need to overlay it specifically.
-                // We might need to add colorkey to remove black background?
-                // Reduce colorkey threshold to 0.03 to avoid eating dark edges
                 filterComplex += `[a_vis]${visFilter},format=rgba,colorkey=0x000000:0.03:0.1[v_vis_gen_raw];`;
-                // Pad to full width to make alignment easy? Or just overlay at coordinates.
-                // Let's use it directly in overlay step.
                 filterComplex += `[v_vis_gen_raw]scale=500:500${visLabel};`;
             } else {
-                // Standard (Rectangular)
-                // Add colorkey to ensure transparency (removes black background common in showcqt)
-                // Reduce colorkey threshold to 0.03 to avoid eating dark edges
+                // Modern Clean Bar (Default)
+                // Using showfreqs with high window size for detail, and explicit white color
+                // ascale=sqrt makes quiet sounds more visible
+                visFilter = `showfreqs=s=${visW}x100:mode=bar:colors=${visColor}:ascale=sqrt:fscale=log:win_size=16384`;
                 filterComplex += `[a_vis]${visFilter},format=rgba,colorkey=0x000000:0.03:0.1[v_vis_gen];`;
             }
 
@@ -643,11 +617,33 @@ async function processJob(job) {
                     lastStream = nextLabel;
                 }
             });
-        } else if (!isAdvanced) {
-            // Legacy Title Overlay
-            const cleanTitle = (job.title_text || '').replace(/'/g, "'\\''");
+        }
+
+        // --- Main Title (Unified Modern Style) ---
+        // Always apply if title exists, regardless of mode
+        if (job.title_text) {
+            const cleanTitle = (job.title_text || '').replace(/'/g, "'\\''").replace(/:/g, "\\:");
             const nextLabel = '[vtitle]';
-            filterComplex += `${lastStream}trim=0:${totalDuration},setpts=PTS-STARTPTS,drawtext=fontfile='${fontPath}':text='${cleanTitle}':fontsize=80:fontcolor=white:borderw=2:bordercolor=black:x=(w-text_w)/2:y=(h-text_h)/2+150${nextLabel};`;
+
+            // Modern Stacked Layout:
+            // 1. "SONG TITLE" label (Small, Uppercase, Spaced)
+            // 2. Actual Title (Large, Bold)
+            // Position: Bottom Right (Margin 50px)
+            // We use two drawtexts.
+
+            // Label
+            // x = w - tw - 50
+            // y = h - th - 120 (Shifted up)
+            // Title
+            // x = w - tw - 50
+            // y = h - th - 50
+
+            let titleFilter = `drawtext=fontfile='${fontPath}':text='SONG TITLE':fontsize=24:fontcolor=white:x=w-tw-50:y=h-th-130:shadowcolor=black@0.5:shadowx=2:shadowy=2`;
+
+            // Main Title
+            titleFilter += `,drawtext=fontfile='${fontPath}':text='${cleanTitle}':fontsize=70:fontcolor=white:x=w-tw-50:y=h-th-50:shadowcolor=black@0.5:shadowx=3:shadowy=3`;
+
+            filterComplex += `${lastStream}${titleFilter}${nextLabel};`;
             lastStream = nextLabel;
         }
 
@@ -709,7 +705,13 @@ async function processJob(job) {
         // Only map audio if pre-concat audio exists
         if (preConcatAudioPath) {
             outputArgs.splice(2, 0, '-map', audioMap); // Insert after -t duration
-            outputArgs.splice(outputArgs.length - 1, 0, '-c:a', 'copy'); // Copy audio codec (already AAC from pre-concat)
+            if (typeof audioOutputLabel !== 'undefined') {
+                // Visualizer enabled -> Audio was filtered -> Must re-encode
+                outputArgs.splice(outputArgs.length - 1, 0, '-c:a', 'aac', '-b:a', '192k');
+            } else {
+                // Raw stream -> Copy
+                outputArgs.splice(outputArgs.length - 1, 0, '-c:a', 'copy');
+            }
         }
 
         const ffmpegArgs = [

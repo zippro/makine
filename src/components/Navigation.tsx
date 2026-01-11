@@ -133,16 +133,7 @@ export default function Navigation() {
                             <span className="hidden md:inline">Home</span>
                         </Link>
 
-                        <Link
-                            href="/projects"
-                            className={`flex items-center gap-1.5 rounded-lg px-2 sm:px-3 py-2 text-sm transition-colors ${isActive("/projects")
-                                ? "bg-primary/10 text-primary font-medium"
-                                : "text-muted hover:text-foreground hover:bg-card"
-                                }`}
-                        >
-                            <FolderOpen className="h-4 w-4" />
-                            <span className="hidden md:inline">Projects</span>
-                        </Link>
+
 
                         <Link
                             href="/todos"

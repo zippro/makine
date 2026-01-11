@@ -5,7 +5,7 @@ import { createClient } from '@/lib/supabase/server';
 export async function POST(request: NextRequest) {
     try {
         const body = await request.json();
-        const { animation_id, image_url, duration, prompt } = body;
+        const { animation_id, image_url, duration, prompt, animation_prompt } = body;
 
         if (!animation_id || !image_url) {
             return NextResponse.json(
@@ -26,6 +26,7 @@ export async function POST(request: NextRequest) {
                         image_url,
                         duration: duration || 10,
                         prompt,
+                        animation_prompt, // Pass the system prompt template
                     }),
                 });
             } catch (webhookError) {
