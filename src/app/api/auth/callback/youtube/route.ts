@@ -33,7 +33,9 @@ export async function GET(request: NextRequest) {
 
     const redirectUrl = process.env.NEXT_PUBLIC_APP_URL
         ? `${process.env.NEXT_PUBLIC_APP_URL}/api/auth/callback/youtube`
-        : "http://localhost:3000/api/auth/callback/youtube";
+        : process.env.NODE_ENV === 'development'
+            ? "http://localhost:3000/api/auth/callback/youtube"
+            : "https://makine-video-ai.vercel.app/api/auth/callback/youtube";
 
     const oauth2Client = new google.auth.OAuth2(
         client_id,

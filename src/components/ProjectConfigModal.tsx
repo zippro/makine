@@ -140,8 +140,8 @@ export function ProjectConfigModal({ project, isOpen, onClose, onUpdate }: Proje
 
                 overlay_config: overlayConfig,
                 visualizer_config: visualizerConfig,
-                default_loop_count: defaultLoopCount,
-                default_image_duration: defaultImageDuration,
+                // default_loop_count: defaultLoopCount, // Disabled for schema fix
+                // default_image_duration: defaultImageDuration, // Disabled for schema fix
                 channel_info: channelInfo,
 
                 keywords: keywords,
@@ -301,8 +301,8 @@ export function ProjectConfigModal({ project, isOpen, onClose, onUpdate }: Proje
                                             <li>Go to "Credentials" → "Create Credentials" → "OAuth Client ID".</li>
                                             <li>Choose "Web Application".</li>
                                             <li>
-                                                Add Redirect URI: <code className="bg-black/20 px-1 rounded">
-                                                    {typeof window !== 'undefined' ? `${window.location.origin}/api/auth/callback/youtube` : '.../api/auth/callback/youtube'}
+                                                Add Redirect URI: <code className="bg-black/20 px-1 rounded select-all">
+                                                    https://makine-video-ai.vercel.app/api/auth/callback/youtube
                                                 </code>
                                             </li>
                                             <li>Copy Client ID & Secret below.</li>
