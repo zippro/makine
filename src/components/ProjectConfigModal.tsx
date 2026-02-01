@@ -145,7 +145,7 @@ export function ProjectConfigModal({ project, isOpen, onClose, onUpdate }: Proje
                 channel_info: channelInfo,
 
                 keywords: keywords,
-                animation_prompts: animationPrompts
+                // animation_prompts: animationPrompts // Disabled to fix schema cache error (column missing in DB)
             };
 
             // Only update credentials if inputs are touched/valid
@@ -352,8 +352,8 @@ export function ProjectConfigModal({ project, isOpen, onClose, onUpdate }: Proje
                                                     window.location.href = url;
                                                 }}
                                                 className={`w-full py-2.5 rounded-lg font-medium flex items-center justify-center gap-2 transition-all ${clientId && clientSecret
-                                                        ? 'bg-[#FF0000] hover:bg-[#CC0000] text-white shadow-lg shadow-red-900/20'
-                                                        : 'bg-muted text-muted-foreground cursor-not-allowed'
+                                                    ? 'bg-[#FF0000] hover:bg-[#CC0000] text-white shadow-lg shadow-red-900/20'
+                                                    : 'bg-muted text-muted-foreground cursor-not-allowed'
                                                     }`}
                                             >
                                                 <Youtube className="w-4 h-4" />
