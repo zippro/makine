@@ -291,6 +291,24 @@ export function ProjectConfigModal({ project, isOpen, onClose, onUpdate }: Proje
                                 <h3 className="text-lg font-semibold border-b border-border pb-2">YouTube Credentials</h3>
                                 <div className="space-y-4">
                                     {/* Existing Credentials */}
+                                    <div className="bg-primary/5 p-4 rounded-xl border border-primary/10 mb-4">
+                                        <h4 className="font-semibold text-primary mb-2 flex items-center gap-2">
+                                            <AlertCircle className="w-4 h-4" /> Setup Instructions
+                                        </h4>
+                                        <ol className="list-decimal ml-4 text-xs text-muted-foreground space-y-1">
+                                            <li>Go to <a href="https://console.cloud.google.com/" target="_blank" className="underline text-primary">Google Cloud Console</a> & create a project.</li>
+                                            <li>Enable "YouTube Data API v3" in Library.</li>
+                                            <li>Go to "Credentials" → "Create Credentials" → "OAuth Client ID".</li>
+                                            <li>Choose "Web Application".</li>
+                                            <li>
+                                                Add Redirect URI: <code className="bg-black/20 px-1 rounded">
+                                                    {typeof window !== 'undefined' ? `${window.location.origin}/api/auth/callback/youtube` : '.../api/auth/callback/youtube'}
+                                                </code>
+                                            </li>
+                                            <li>Copy Client ID & Secret below.</li>
+                                        </ol>
+                                    </div>
+
                                     <div>
                                         <label className="text-sm font-medium block mb-1.5">Client ID</label>
                                         <input
@@ -298,7 +316,7 @@ export function ProjectConfigModal({ project, isOpen, onClose, onUpdate }: Proje
                                             value={clientId}
                                             onChange={(e) => setClientId(e.target.value)}
                                             className="w-full bg-card border border-border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/20 outline-none"
-                                            placeholder="Enter Google Client ID"
+                                            placeholder="Example: 123456789-abcdef...apps.googleusercontent.com"
                                         />
                                     </div>
                                     <div>
@@ -308,9 +326,47 @@ export function ProjectConfigModal({ project, isOpen, onClose, onUpdate }: Proje
                                             value={clientSecret}
                                             onChange={(e) => setClientSecret(e.target.value)}
                                             className="w-full bg-card border border-border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/20 outline-none"
-                                            placeholder="Enter Google Client Secret"
+                                            placeholder="Example: GOCSPX-..."
                                         />
                                     </div>
+
+                                    {/* Connect Button */}
+                                    <div className="pt-2">
+                                        {refreshToken ? (
+                                            <div className="flex items-center gap-2 text-green-500 bg-green-500/10 p-3 rounded-lg border border-green-500/20">
+                                                <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
+                                                <span className="text-sm font-medium">YouTube Connected</span>
+                                                <button
+                                                    onClick={() => setRefreshToken("")}
+                                                    className="ml-auto text-xs text-muted hover:text-white underline"
+                                                >
+                                                    Disconnect
+                                                </button>
+                                            </div>
+                                        ) : (
+                                            <button
+                                                type="button"
+                                                disabled={!clientId || !clientSecret}
+                                                onClick={() => {
+                                                    const url = `/api/auth/youtube?projectId=${project.id}&clientId=${clientId}&clientSecret=${clientSecret}`;
+                                                    window.location.href = url;
+                                                }}
+                                                className={`w-full py-2.5 rounded-lg font-medium flex items-center justify-center gap-2 transition-all ${clientId && clientSecret
+                                                        ? 'bg-[#FF0000] hover:bg-[#CC0000] text-white shadow-lg shadow-red-900/20'
+                                                        : 'bg-muted text-muted-foreground cursor-not-allowed'
+                                                    }`}
+                                            >
+                                                <Youtube className="w-4 h-4" />
+                                                Connect YouTube Account
+                                            </button>
+                                        )}
+                                        <p className="text-[10px] text-center text-muted mt-2">
+                                            This will redirect you to Google to authorize the app.
+                                        </p>
+                                    </div>
+
+                                    {/* Hidden manual refresh token input for debugging if needed */}
+                                    {/* 
                                     <div>
                                         <label className="text-sm font-medium block mb-1.5">Refresh Token</label>
                                         <input
@@ -320,7 +376,8 @@ export function ProjectConfigModal({ project, isOpen, onClose, onUpdate }: Proje
                                             className="w-full bg-card border border-border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary/20 outline-none"
                                             placeholder="Enter Google Refresh Token"
                                         />
-                                    </div>
+                                    </div> 
+                                    */}
                                 </div>
                             </div>
                         )}
