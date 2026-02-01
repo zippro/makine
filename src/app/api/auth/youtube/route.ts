@@ -20,11 +20,12 @@ export async function GET(request: NextRequest) {
         youtube_creds: { client_id: clientId, client_secret: clientSecret }
     }).eq("id", projectId);
 
-    const redirectUrl = process.env.NEXT_PUBLIC_APP_URL
-        ? `${process.env.NEXT_PUBLIC_APP_URL}/api/auth/callback/youtube`
-        : process.env.NODE_ENV === 'development'
-            ? "http://localhost:3000/api/auth/callback/youtube"
-            : "https://makine-video-ai.vercel.app/api/auth/callback/youtube";
+    // Force production URL in production to avoid env var mismatches
+    const baseUrl = process.env.NODE_ENV === 'production'
+        ? "https://makine-video-ai.vercel.app"
+        : (process.env.NEXT_PUBLIC_APP_URL || "http://localhost:3000");
+
+    const redirectUrl = `${baseUrl}/api/auth/callback/youtube`;
 
     const oauth2Client = new google.auth.OAuth2(
         clientId,
