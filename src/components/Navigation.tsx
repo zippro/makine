@@ -3,9 +3,10 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Video, History, Image, Music, FolderOpen, Home, Clapperboard, ChevronDown, Check, ListTodo, LogOut, User, Upload } from "lucide-react";
+import { Video, History, Image, Music, FolderOpen, Home, Clapperboard, ChevronDown, Check, ListTodo, LogOut, User, Upload, Bot } from "lucide-react";
 import { useProject } from "@/context/ProjectContext";
 import { createClient } from "@/lib/supabase/client";
+import AISettingsModal from "@/components/AISettingsModal";
 
 export default function Navigation() {
     const pathname = usePathname();
@@ -14,6 +15,7 @@ export default function Navigation() {
     const [isDropdownOpen, setIsDropdownOpen] = useState(false);
     const [nickname, setNickname] = useState<string | null>(null);
     const [mentionCount, setMentionCount] = useState(0);
+    const [showAISettings, setShowAISettings] = useState(false);
     const supabase = createClient();
 
     // Fetch user nickname and mention count
@@ -262,9 +264,21 @@ export default function Navigation() {
                         >
                             <LogOut className="h-4 w-4" />
                         </button>
+
+                        {/* AI Settings Button */}
+                        <button
+                            onClick={() => setShowAISettings(true)}
+                            className="flex items-center gap-1.5 rounded-lg px-2 sm:px-3 py-2 text-sm text-muted hover:text-purple-400 hover:bg-card transition-colors"
+                            title="AI Settings"
+                        >
+                            <Bot className="h-4 w-4" />
+                        </button>
                     </div>
                 </div>
             </div>
+
+            {/* AI Settings Modal */}
+            <AISettingsModal isOpen={showAISettings} onClose={() => setShowAISettings(false)} />
         </nav>
     );
 }
