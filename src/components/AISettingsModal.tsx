@@ -96,10 +96,10 @@ export default function AISettingsModal({ isOpen, onClose }: AISettingsModalProp
     if (!isOpen || !mounted) return null;
 
     const modalContent = (
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-[9999] flex items-start justify-center pt-16 p-4 overflow-y-auto">
             <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} />
 
-            <div className="relative bg-gradient-to-br from-slate-900 to-slate-800 rounded-2xl shadow-2xl border border-white/10 w-full max-w-3xl max-h-[85vh] overflow-hidden flex flex-col">
+            <div className="relative bg-gradient-to-br from-slate-900 to-slate-800 rounded-2xl shadow-2xl border border-white/10 w-full max-w-3xl max-h-[85vh] overflow-hidden flex flex-col mb-8">
                 {/* Header */}
                 <div className="flex items-center justify-between px-6 py-4 border-b border-white/10">
                     <div className="flex items-center gap-3">
