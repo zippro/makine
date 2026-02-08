@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { X, Save, Loader2, Bot, Video, RefreshCw, AlertCircle } from 'lucide-react';
 
 interface AISettingsModalProps {
@@ -31,6 +32,12 @@ export default function AISettingsModal({ isOpen, onClose }: AISettingsModalProp
     const [error, setError] = useState<string | null>(null);
     const [success, setSuccess] = useState<string | null>(null);
     const [activeTab, setActiveTab] = useState<'vlm' | 'video' | 'prompts'>('vlm');
+    const [mounted, setMounted] = useState(false);
+
+    // Handle client-side mounting for portal
+    useEffect(() => {
+        setMounted(true);
+    }, []);
 
     // Fetch settings when modal opens
     useEffect(() => {
@@ -86,13 +93,13 @@ export default function AISettingsModal({ isOpen, onClose }: AISettingsModalProp
         setSettings({ ...settings, [field]: value });
     };
 
-    if (!isOpen) return null;
+    if (!isOpen || !mounted) return null;
 
-    return (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+    const modalContent = (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} />
 
-            <div className="relative bg-gradient-to-br from-slate-900 to-slate-800 rounded-2xl shadow-2xl border border-white/10 w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
+            <div className="relative bg-gradient-to-br from-slate-900 to-slate-800 rounded-2xl shadow-2xl border border-white/10 w-full max-w-3xl max-h-[85vh] overflow-hidden flex flex-col">
                 {/* Header */}
                 <div className="flex items-center justify-between px-6 py-4 border-b border-white/10">
                     <div className="flex items-center gap-3">
@@ -120,8 +127,8 @@ export default function AISettingsModal({ isOpen, onClose }: AISettingsModalProp
                             key={tab.id}
                             onClick={() => setActiveTab(tab.id)}
                             className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors ${activeTab === tab.id
-                                    ? 'bg-white/10 text-white'
-                                    : 'text-white/60 hover:text-white hover:bg-white/5'
+                                ? 'bg-white/10 text-white'
+                                : 'text-white/60 hover:text-white hover:bg-white/5'
                                 }`}
                         >
                             <tab.icon className="w-4 h-4" />
@@ -332,4 +339,6 @@ export default function AISettingsModal({ isOpen, onClose }: AISettingsModalProp
             </div>
         </div>
     );
+
+    return createPortal(modalContent, document.body);
 }
