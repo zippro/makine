@@ -50,7 +50,7 @@ export async function PATCH(request: NextRequest) {
     try {
         const supabase = await createClient();
         const body = await request.json();
-        const { id, is_approved, trim_start, trim_end, speed_multiplier, url } = body;
+        const { id, is_approved, trim_start, trim_end, speed_multiplier, url, status, error_message } = body;
 
         if (!id) {
             return NextResponse.json(
@@ -65,6 +65,8 @@ export async function PATCH(request: NextRequest) {
         if (trim_end !== undefined) updateData.trim_end = trim_end;
         if (speed_multiplier !== undefined) updateData.speed_multiplier = speed_multiplier;
         if (url !== undefined) updateData.url = url;
+        if (status !== undefined) updateData.status = status;
+        if (error_message !== undefined) updateData.error_message = error_message;
         const { folder } = body;
         if (folder !== undefined) updateData.folder = folder;
 

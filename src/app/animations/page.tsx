@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import { Check, Trash2, Loader2, Video, AlertCircle, ChevronDown, ChevronUp, Play, X, FolderOpen, Edit2 } from 'lucide-react';
+import { Check, Trash2, Loader2, Video, AlertCircle, ChevronDown, ChevronUp, Play, X, FolderOpen, Edit2, RotateCcw } from 'lucide-react';
 import { useProject } from '@/context/ProjectContext';
 import { VideoDetailsModal } from '@/components/VideoDetailsModal';
 import { MoveAssetModal } from '@/components/MoveAssetModal';
@@ -15,6 +15,7 @@ interface Animation {
     status: string;
     is_approved: boolean;
     error_message: string | null;
+    prompt: string | null;
     video_usage_count: number;
     trim_start: number;
     trim_end: number;
@@ -38,6 +39,8 @@ export default function AnimationsPage() {
     const [selectedAnimation, setSelectedAnimation] = useState<Animation | null>(null);
     const [editingId, setEditingId] = useState<string | null>(null);
     const [updatingId, setUpdatingId] = useState<string | null>(null);
+    const [reanimatingId, setReanimatingId] = useState<string | null>(null);
+    const [expandedPromptId, setExpandedPromptId] = useState<string | null>(null);
 
     // Modal State
     const [detailsModalOpen, setDetailsModalOpen] = useState(false);
@@ -313,6 +316,54 @@ export default function AnimationsPage() {
         setEditTrimStart(animation.trim_start);
         setEditTrimEnd(animation.trim_end);
         setEditSpeed(animation.speed_multiplier);
+    };
+
+    const handleReanimate = async (animation: Animation) => {
+        if (!animation.images?.url) {
+            alert('No source image found for this animation.');
+            return;
+        }
+        if (!confirm('Reanimate this image? This will generate a new video.')) return;
+
+        setReanimatingId(animation.id);
+        try {
+            // Reset status to processing
+            const resetRes = await fetch('/api/animations', {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    id: animation.id,
+                    status: 'processing',
+                    error_message: null,
+                }),
+            });
+            if (!resetRes.ok) throw new Error('Failed to reset animation status');
+
+            // Trigger generation
+            fetch('/api/animations/generate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    animation_id: animation.id,
+                    image_url: animation.images.url,
+                    duration: animation.duration,
+                }),
+            }).catch(err => console.error('Reanimate request failed:', err));
+
+            // Update UI optimistically
+            setAnimations(prev =>
+                prev.map(a =>
+                    a.id === animation.id
+                        ? { ...a, status: 'processing', error_message: null }
+                        : a
+                )
+            );
+        } catch (err) {
+            console.error('Error reanimating:', err);
+            alert('Failed to start reanimation.');
+        } finally {
+            setReanimatingId(null);
+        }
     };
 
     const cancelEditing = () => {
@@ -703,7 +754,7 @@ export default function AnimationsPage() {
 
                                 {/* Info & Controls */}
                                 <div className="p-4 bg-white/[0.02]">
-                                    <div className="flex items-center justify-between mb-4">
+                                    <div className="flex items-center justify-between mb-2">
                                         <div className="flex flex-col">
                                             <span className="text-xs font-mono text-gray-500">ID: {animation.id.slice(0, 4)}</span>
                                             <span className="text-sm font-medium text-gray-300">{Number(animation.duration).toFixed(1)}s</span>
@@ -715,6 +766,39 @@ export default function AnimationsPage() {
                                             </span>
                                         )}
                                     </div>
+
+                                    {/* Prompt Display */}
+                                    {animation.prompt && (
+                                        <div className="mb-3">
+                                            <button
+                                                onClick={(e) => {
+                                                    e.stopPropagation();
+                                                    setExpandedPromptId(expandedPromptId === animation.id ? null : animation.id);
+                                                }}
+                                                className="w-full text-left group/prompt"
+                                            >
+                                                <p className={`text-xs text-gray-400 leading-relaxed ${expandedPromptId === animation.id ? '' : 'line-clamp-2'
+                                                    }`}>
+                                                    <span className="text-gray-500 font-medium">Prompt: </span>
+                                                    {animation.prompt}
+                                                </p>
+                                                {animation.prompt.length > 80 && (
+                                                    <span className="text-[10px] text-gray-600 hover:text-gray-400 transition-colors mt-0.5 inline-block">
+                                                        {expandedPromptId === animation.id ? '▲ less' : '▼ more'}
+                                                    </span>
+                                                )}
+                                            </button>
+                                        </div>
+                                    )}
+
+                                    {/* Error Message */}
+                                    {animation.error_message && (
+                                        <div className="mb-3 p-2 rounded-lg bg-red-500/10 border border-red-500/20">
+                                            <p className="text-xs text-red-400 line-clamp-2">
+                                                {animation.error_message}
+                                            </p>
+                                        </div>
+                                    )}
 
                                     {/* Editing Controls */}
                                     {editingId === animation.id && animation.status === 'done' ? (
@@ -826,6 +910,23 @@ export default function AnimationsPage() {
                                                     title="Edit"
                                                 >
                                                     <span className="text-xs font-medium">Edit</span>
+                                                </button>
+                                            )}
+
+                                            {/* Reanimate Button */}
+                                            {animation.images?.url && (animation.status === 'done' || animation.status === 'error') && (
+                                                <button
+                                                    onClick={() => handleReanimate(animation)}
+                                                    disabled={reanimatingId === animation.id}
+                                                    className="p-2 rounded-lg text-gray-400 hover:text-purple-400 hover:bg-purple-500/10 transition-colors flex items-center gap-1"
+                                                    title="Reanimate"
+                                                >
+                                                    {reanimatingId === animation.id ? (
+                                                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                                    ) : (
+                                                        <RotateCcw className="w-3.5 h-3.5" />
+                                                    )}
+                                                    <span className="text-xs font-medium">Reanimate</span>
                                                 </button>
                                             )}
 
