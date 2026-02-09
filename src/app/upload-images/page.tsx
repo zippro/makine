@@ -14,6 +14,7 @@ export default function UploadImagesPage() {
     const { currentProject } = useProject();
     const [duration, setDuration] = useState<5 | 10>(10);
     const [selectedTypeId, setSelectedTypeId] = useState<string>('loop');
+    const [animateAfterUpload, setAnimateAfterUpload] = useState(true);
     const [uploading, setUploading] = useState(false);
     const [progress, setProgress] = useState<UploadStatus[]>([]);
     const [error, setError] = useState<string | null>(null);
@@ -274,42 +275,50 @@ export default function UploadImagesPage() {
                     p.id === item.id ? { ...p, status: 'uploaded' as const, url: publicUrl } : p
                 ));
 
-                // Create animation record
-                setProgress(prev => prev.map(p =>
-                    p.id === item.id ? { ...p, status: 'generating' as const } : p
-                ));
+                // Animate only if toggle is on
+                if (animateAfterUpload) {
+                    // Create animation record
+                    setProgress(prev => prev.map(p =>
+                        p.id === item.id ? { ...p, status: 'generating' as const } : p
+                    ));
 
-                const { data: animation, error: animError } = await supabase
-                    .from('animations')
-                    .insert({
-                        image_id: imageRecord.id,
-                        duration: duration,
-                        status: 'queued',
-                        project_id: currentProject.id,
-                        folder: currentFolder // Inherit folder
-                    })
-                    .select()
-                    .single();
+                    const { data: animation, error: animError } = await supabase
+                        .from('animations')
+                        .insert({
+                            image_id: imageRecord.id,
+                            duration: duration,
+                            status: 'queued',
+                            project_id: currentProject.id,
+                            folder: currentFolder // Inherit folder
+                        })
+                        .select()
+                        .single();
 
-                if (animError) throw animError;
+                    if (animError) throw animError;
 
-                // Trigger generation (Fire and Forget)
-                fetch('/api/animations/generate', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        animation_id: animation.id,
-                        image_url: publicUrl,
-                        duration: duration,
-                        prompt: item.prompt,
-                        animation_prompt: currentProject.animation_prompts?.find(p => p.id === selectedTypeId)?.prompt || ''
-                    }),
-                }).catch((err: any) => console.error('Webhook trigger error:', err));
+                    // Trigger generation (Fire and Forget)
+                    fetch('/api/animations/generate', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            animation_id: animation.id,
+                            image_url: publicUrl,
+                            duration: duration,
+                            prompt: item.prompt,
+                            animation_prompt: currentProject.animation_prompts?.find(p => p.id === selectedTypeId)?.prompt || ''
+                        }),
+                    }).catch((err: any) => console.error('Webhook trigger error:', err));
 
-                // Immediately set to done (queued)
-                setProgress(prev => prev.map(p =>
-                    p.id === item.id ? { ...p, status: 'done' as const, animationId: animation.id } : p
-                ));
+                    // Immediately set to done (queued)
+                    setProgress(prev => prev.map(p =>
+                        p.id === item.id ? { ...p, status: 'done' as const, animationId: animation.id } : p
+                    ));
+                } else {
+                    // Upload only - no animation
+                    setProgress(prev => prev.map(p =>
+                        p.id === item.id ? { ...p, status: 'done' as const } : p
+                    ));
+                }
 
             } catch (error) {
                 console.error('Error processing image:', error);
@@ -523,19 +532,36 @@ export default function UploadImagesPage() {
                 {/* Upload Form */}
                 {!uploading ? (
                     <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-                        {/* ... */}
                         <div className="flex justify-center flex-col items-center gap-2">
                             <div className="bg-white/5 px-4 py-1 rounded-full text-xs text-muted-foreground border border-white/10 mb-2">
                                 Uploading to: <span className="text-white font-mono font-medium">{currentFolder === '/' ? 'Root Folder' : currentFolder}</span>
                             </div>
-                            <AnimationDurationSelect
-                                value={duration}
-                                onChange={setDuration}
-                            />
-                            <AnimationTypeSelect
-                                value={selectedTypeId}
-                                onChange={setSelectedTypeId}
-                            />
+                            <div className="flex items-center gap-4 flex-wrap justify-center">
+                                <button
+                                    onClick={() => setAnimateAfterUpload(!animateAfterUpload)}
+                                    className={`flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium transition-all border ${animateAfterUpload
+                                        ? 'bg-primary/20 text-primary border-primary/30'
+                                        : 'bg-muted/20 text-muted-foreground border-border hover:bg-muted/30'
+                                        }`}
+                                >
+                                    <div className={`w-8 h-4 rounded-full relative transition-colors ${animateAfterUpload ? 'bg-primary' : 'bg-muted'}`}>
+                                        <div className={`absolute w-3 h-3 rounded-full bg-white top-0.5 transition-all ${animateAfterUpload ? 'left-4' : 'left-0.5'}`} />
+                                    </div>
+                                    Animate after upload
+                                </button>
+                                {animateAfterUpload && (
+                                    <>
+                                        <AnimationDurationSelect
+                                            value={duration}
+                                            onChange={setDuration}
+                                        />
+                                        <AnimationTypeSelect
+                                            value={selectedTypeId}
+                                            onChange={setSelectedTypeId}
+                                        />
+                                    </>
+                                )}
+                            </div>
                         </div>
 
                         <div className="bg-card/50 backdrop-blur-sm rounded-2xl p-2 shadow-xl ring-1 ring-white/10">
@@ -553,7 +579,6 @@ export default function UploadImagesPage() {
                     </div>
                 ) : null}
 
-                {/* ... progress ... */}
                 <div className="mt-8">
                     <UploadProgress
                         items={progress}
@@ -565,16 +590,17 @@ export default function UploadImagesPage() {
                     />
                 </div>
 
-                {doneCount > 0 && ( /* ... */
+                {doneCount > 0 && (
                     <div className="mt-8 p-4 rounded-xl bg-success/10 border border-success/20 text-center">
                         <p className="text-success font-medium">
-                            {doneCount} animation{doneCount !== 1 ? 's' : ''} queued for generation.{' '}
-                            <a href="/animations" className="underline hover:no-underline">
-                                View Animations →
+                            {doneCount} image{doneCount !== 1 ? 's' : ''} {animateAfterUpload ? 'queued for animation' : 'uploaded successfully'}.{' '}
+                            <a href={animateAfterUpload ? '/animations' : '/upload-images'} className="underline hover:no-underline">
+                                {animateAfterUpload ? 'View Animations →' : 'View Images →'}
                             </a>
                         </p>
                     </div>
                 )}
+
             </div>
 
             {/* Existing Images Gallery with Folders */}
