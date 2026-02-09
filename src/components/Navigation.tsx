@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Video, History, Image, Music, FolderOpen, Home, Clapperboard, ChevronDown, Check, ListTodo, LogOut, User, Upload, Bot } from "lucide-react";
+import { Video, History, Image, Music, FolderOpen, Home, Clapperboard, ChevronDown, Check, ListTodo, LogOut, User, Upload, Bot, HardDrive } from "lucide-react";
 import { useProject } from "@/context/ProjectContext";
 import { createClient } from "@/lib/supabase/client";
 import AISettingsModal from "@/components/AISettingsModal";
@@ -206,6 +206,16 @@ export default function Navigation() {
                             <Upload className="h-4 w-4" />
                             <span className="hidden lg:inline">Publish</span>
                         </Link>
+
+                        <a
+                            href={`https://${process.env.NEXT_PUBLIC_SERVER_IP || '46.62.209.244'}.nip.io/browse/`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="flex items-center gap-1.5 rounded-lg px-2 sm:px-3 py-2 text-sm transition-colors text-muted hover:text-foreground hover:bg-card"
+                            title="Server Storage"
+                        >
+                            <HardDrive className="h-4 w-4" />
+                        </a>
 
                         <div className="h-4 w-px bg-border mx-1" />
 
