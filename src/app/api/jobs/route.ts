@@ -22,24 +22,35 @@ export async function POST(request: NextRequest) {
             .eq('id', project_id)
             .single();
 
-        const videoMode = projectData?.video_mode || 'simple_animation';
         const templateAssets = projectData?.template_assets || [];
         const overlayConfig = projectData?.overlay_config || { images: [], title: { enabled: true } };
-        const visualizerConfig = (projectData as any)?.visualizer_config; // Cast as any if type not yet updated in DB schema def
-        // We need to fetch default_loop_count now
+        const visualizerConfig = (projectData as any)?.visualizer_config;
 
+        // Auto-detect video mode based on available data:
+        // - If playlist has items → use multi/slideshow mode
+        // - If animation_id provided and no playlist → use simple mode
+        // - Fall back to project setting
+        let videoMode = projectData?.video_mode || 'simple_animation';
+        if (templateAssets.length > 0) {
+            // Playlist has items — auto-switch to multi mode
+            const hasAnimations = templateAssets.some((a: any) => a.type === 'animation' || a.type === 'video');
+            const hasImages = templateAssets.some((a: any) => a.type === 'image');
+            if (hasAnimations || hasImages) {
+                videoMode = hasAnimations ? 'multi_animation' : 'image_slideshow';
+            }
+        } else if (animation_id) {
+            videoMode = 'simple_animation';
+        }
 
         // Validate Mode-Specific Requirements
         if (videoMode === 'simple_animation') {
             if (!animation_id) {
-                return NextResponse.json({ error: 'Missing required field: animation_id' }, { status: 400 });
+                return NextResponse.json({ error: 'Playlist is empty and no animation selected. Add images or animations to the playlist.' }, { status: 400 });
             }
         } else {
-            // Multi/Slideshow
             if (!templateAssets || templateAssets.length === 0) {
-                return NextResponse.json({ error: 'Playlist is empty. Add assets in Project Settings.' }, { status: 400 });
+                return NextResponse.json({ error: 'Playlist is empty. Add images or animations to the playlist.' }, { status: 400 });
             }
-            // animation_id is optional/ignored here
         }
 
         // Validate title length
