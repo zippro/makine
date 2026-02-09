@@ -54,6 +54,7 @@ export default function Home() {
   const [showImagePicker, setShowImagePicker] = useState(false);
   const [projectImages, setProjectImages] = useState<ProjectImage[]>([]);
   const [draggedMusicIndex, setDraggedMusicIndex] = useState<number | null>(null);
+  const [projectFolders, setProjectFolders] = useState<{ id: string; path: string; project_id: string }[]>([]);
 
   // Folder State
   const [currentMusicFolder, setCurrentMusicFolder] = useState<string>('/');
@@ -66,6 +67,18 @@ export default function Home() {
 
   const getSubfolders = (items: any[], currentPath: string) => {
     const folders = new Set<string>();
+
+    // 1. From persistent DB folders
+    projectFolders.forEach(pf => {
+      const fPath = pf.path;
+      if (fPath !== currentPath && fPath.startsWith(currentPath)) {
+        const rel = fPath.slice(currentPath.length + (currentPath === '/' ? 0 : 1));
+        const firstPart = rel.split('/')[0];
+        if (firstPart) folders.add(currentPath === '/' ? `/${firstPart}` : `${currentPath}/${firstPart}`);
+      }
+    });
+
+    // 2. From item data
     items.forEach(i => {
       const f = i.folder || '/';
       if (f !== currentPath && f.startsWith(currentPath)) {
@@ -74,7 +87,7 @@ export default function Home() {
         if (firstPart) folders.add(currentPath === '/' ? `/${firstPart}` : `${currentPath}/${firstPart}`);
       }
     });
-    return Array.from(folders);
+    return Array.from(folders).sort();
   };
 
   const createFolder = async (type: 'music' | 'animation', folderName: string) => {
@@ -157,6 +170,17 @@ export default function Home() {
 
       if (anims) setAnimations(anims);
       if (music) setMusicLibrary(music);
+
+      // Fetch persistent folders
+      try {
+        const foldersRes = await fetch(`/api/folders?projectId=${currentProject.id}`);
+        if (foldersRes.ok) {
+          const foldersData = await foldersRes.json();
+          setProjectFolders(foldersData);
+        }
+      } catch (err) {
+        console.error('Failed to fetch folders', err);
+      }
     };
 
     fetchData();
@@ -572,10 +596,15 @@ export default function Home() {
                   const subfolders = getSubfolders(animations, currentAnimFolder);
                   return subfolders.sort().map(folderPath => {
                     const folderName = folderPath.split('/').pop();
+                    const count = animations.filter(a => {
+                      const f = a.folder || '/';
+                      return f === folderPath || f.startsWith(folderPath + '/');
+                    }).length;
                     return (
                       <button key={folderPath} onDoubleClick={() => setCurrentAnimFolder(folderPath)} className="group rounded-xl border-2 border-border border-dashed p-4 flex flex-col items-center justify-center gap-3 hover:border-primary/50 hover:bg-primary/5 transition-all">
                         <FolderOpen className="w-10 h-10 text-primary/50 group-hover:text-primary" />
                         <span className="text-sm font-medium">{folderName}</span>
+                        <span className="text-xs text-muted-foreground">{count} item{count !== 1 ? 's' : ''}</span>
                       </button>
                     )
                   });
@@ -779,10 +808,15 @@ export default function Home() {
               <div className="space-y-2">
                 {getSubfolders(musicLibrary, currentMusicFolder).map(folderPath => {
                   const folderName = folderPath.split('/').pop();
+                  const count = musicLibrary.filter(t => {
+                    const f = (t as any).folder || '/';
+                    return f === folderPath || f.startsWith(folderPath + '/');
+                  }).length;
                   return (
                     <button key={folderPath} onDoubleClick={() => setCurrentMusicFolder(folderPath)} className="w-full flex items-center gap-3 p-3 rounded-xl border border-border bg-card/50 hover:border-primary/50 text-left transition-all">
                       <FolderOpen className="w-5 h-5 text-primary/50" />
-                      <span className="font-medium">{folderName}</span>
+                      <span className="font-medium flex-1">{folderName}</span>
+                      <span className="text-xs text-muted-foreground">{count} item{count !== 1 ? 's' : ''}</span>
                     </button>
                   )
                 })}
