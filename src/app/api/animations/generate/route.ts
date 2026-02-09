@@ -50,6 +50,45 @@ export async function POST(request: NextRequest) {
             });
             generatedPrompt = promptResult.prompt;
             console.log(`[Animation Generate] Generated prompt: ${generatedPrompt.substring(0, 100)}...`);
+
+            // Validate VLM response - detect refusal/inability responses
+            const refusalPhrases = [
+                "i'm unable to",
+                "i cannot",
+                "i can't",
+                "unable to analyze",
+                "i don't have the ability",
+                "i am unable",
+                "as an ai",
+                "i'm not able to",
+            ];
+            const lowerPrompt = generatedPrompt.toLowerCase();
+            const isRefusal = refusalPhrases.some(phrase => lowerPrompt.includes(phrase));
+
+            if (isRefusal) {
+                console.warn(`[Animation Generate] VLM returned a refusal response, retrying...`);
+                // Retry once
+                const retryResult = await generateAnimationPrompt({
+                    imageUrl: image_url,
+                    userPrompt: prompt || '',
+                    userPromptTemplate: animation_prompt,
+                });
+                const retryPrompt = retryResult.prompt;
+                const retryLower = retryPrompt.toLowerCase();
+                const isStillRefusal = refusalPhrases.some(phrase => retryLower.includes(phrase));
+
+                if (isStillRefusal) {
+                    // If user provided a prompt, use it directly as fallback
+                    if (prompt && prompt.trim().length > 0) {
+                        console.warn('[Animation Generate] VLM refusal persists, using user prompt as fallback');
+                        generatedPrompt = prompt;
+                    } else {
+                        throw new Error('VLM could not analyze the image after 2 attempts. The image URL may not be accessible to OpenAI.');
+                    }
+                } else {
+                    generatedPrompt = retryPrompt;
+                }
+            }
         } catch (promptError) {
             console.error('[Animation Generate] Prompt generation failed:', promptError);
             await supabase
@@ -66,6 +105,12 @@ export async function POST(request: NextRequest) {
                 { status: 500 }
             );
         }
+
+        // Save prompt to DB immediately (so it's not lost if later steps fail)
+        await supabase
+            .from('animations')
+            .update({ prompt: generatedPrompt, updated_at: new Date().toISOString() })
+            .eq('id', animation_id);
 
         // Step 2: Submit to Fal.ai for video generation
         console.log('[Animation Generate] Submitting to Fal.ai Kling...');
@@ -161,6 +206,21 @@ export async function POST(request: NextRequest) {
 
     } catch (error) {
         console.error('Error in POST /api/animations/generate:', error);
+        // Mark animation as error so it doesn't stay stuck at 'processing'
+        try {
+            const body = await request.clone().json().catch(() => null);
+            if (body?.animation_id) {
+                const supabase = createAdminClient();
+                await supabase
+                    .from('animations')
+                    .update({
+                        status: 'error',
+                        error_message: `Unexpected error: ${error instanceof Error ? error.message : 'Unknown error'}`,
+                        updated_at: new Date().toISOString(),
+                    })
+                    .eq('id', body.animation_id);
+            }
+        } catch (_) { /* best effort */ }
         return NextResponse.json(
             { error: 'Internal server error' },
             { status: 500 }

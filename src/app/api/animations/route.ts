@@ -14,6 +14,24 @@ export async function GET(request: NextRequest) {
             return NextResponse.json({ error: 'Project ID required' }, { status: 400 });
         }
 
+        // Auto-cleanup: mark stale 'processing' animations (>15 min) as error
+        const fifteenMinAgo = new Date(Date.now() - 15 * 60 * 1000).toISOString();
+        const { data: staleAnimations } = await supabase
+            .from('animations')
+            .update({
+                status: 'error',
+                error_message: 'Animation timed out after 15 minutes of processing. Please try reanimating.',
+                updated_at: new Date().toISOString(),
+            })
+            .eq('project_id', projectId)
+            .eq('status', 'processing')
+            .lt('updated_at', fifteenMinAgo)
+            .select('id');
+
+        if (staleAnimations && staleAnimations.length > 0) {
+            console.log(`[Animations] Auto-cleaned ${staleAnimations.length} stale processing animation(s)`);
+        }
+
         const { data: animations, error } = await supabase
             .from('animations')
             .select(`
