@@ -587,6 +587,7 @@ export default function UploadImagesPage() {
                         onGeneratePrompt={handleGeneratePrompt}
                         onUpload={uploadAndGenerate}
                         uploading={uploading}
+                        animateMode={animateAfterUpload}
                     />
                 </div>
 

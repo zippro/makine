@@ -21,9 +21,10 @@ interface UploadProgressProps {
     onPromptChange: (id: string, prompt: string) => void;
     onGeneratePrompt?: (id: string, imageDataUrl: string) => Promise<string>;
     uploading: boolean;
+    animateMode?: boolean;
 }
 
-export default function UploadProgress({ items, onRemove, onUpload, onPromptChange, onGeneratePrompt, uploading }: UploadProgressProps) {
+export default function UploadProgress({ items, onRemove, onUpload, onPromptChange, onGeneratePrompt, uploading, animateMode = true }: UploadProgressProps) {
     const [generatingIds, setGeneratingIds] = useState<Set<string>>(new Set());
     const [generatingAll, setGeneratingAll] = useState(false);
 
@@ -66,7 +67,7 @@ export default function UploadProgress({ items, onRemove, onUpload, onPromptChan
                     {items.length} image{items.length !== 1 ? 's' : ''} selected
                 </h2>
                 <div className="flex gap-3">
-                    {pendingCount > 0 && onGeneratePrompt && (
+                    {pendingCount > 0 && animateMode && onGeneratePrompt && (
                         <button
                             onClick={handleGenerateAll}
                             disabled={uploading || generatingAll}
@@ -93,7 +94,7 @@ export default function UploadProgress({ items, onRemove, onUpload, onPromptChan
                                 </>
                             ) : (
                                 <>
-                                    Generate Animations ({pendingCount})
+                                    {animateMode ? `Generate Animations (${pendingCount})` : `Upload Images (${pendingCount})`}
                                 </>
                             )}
                         </button>
@@ -137,7 +138,7 @@ export default function UploadProgress({ items, onRemove, onUpload, onPromptChan
                                         <div className="w-8 h-8 rounded-full bg-success flex items-center justify-center mx-auto">
                                             <Check className="w-5 h-5 text-white" />
                                         </div>
-                                        <p className="text-xs mt-1 text-white">Queued</p>
+                                        <p className="text-xs mt-1 text-white">{animateMode ? 'Queued' : 'Uploaded'}</p>
                                     </div>
                                 )}
                                 {item.status === 'error' && (
@@ -163,7 +164,7 @@ export default function UploadProgress({ items, onRemove, onUpload, onPromptChan
                         </div>
 
                         {/* Prompt Input */}
-                        {item.status === 'pending' && (
+                        {item.status === 'pending' && animateMode && (
                             <div className="p-3 bg-card border-t border-border space-y-2">
                                 <div className="flex items-center justify-between">
                                     <span className="text-[10px] text-gray-500 font-medium uppercase tracking-wider">Prompt</span>
