@@ -81,6 +81,7 @@ export function ProjectConfigModal({ project, isOpen, onClose, onUpdate }: Proje
             prompt: "Look at this image. Write a single prompt for Kling AI to generate a SEAMLESS LOOP animation based on this image.\n\nUSER CONTEXT: {{user_prompt}}\n\nCRITICAL REQUIREMENTS:\n1. **Loop**: The animation must be a consecutive loop (start frame = end frame).\n2. **Camera**: STATIC CAMERA ONLY. No pan, no zoom, no tilt.\n3. **Motion**: Only small, internal effects (wind, fog, water flow, breathing).\n4. **Output**: A single comma-separated string suitable for image-to-video generation.\n\nAnalyze the subject and depth. Describe the scene and specify subtle motions."
         }
     ]);
+    const [defaultAnimationTypeId, setDefaultAnimationTypeId] = useState<string>('loop');
 
     // UI State
     const [isLoading, setIsLoading] = useState(false);
@@ -121,6 +122,7 @@ export function ProjectConfigModal({ project, isOpen, onClose, onUpdate }: Proje
             if (project.animation_prompts && project.animation_prompts.length > 0) {
                 setAnimationPrompts(project.animation_prompts);
             }
+            setDefaultAnimationTypeId(project.default_animation_type_id || 'loop');
         }
     }, [isOpen, project]);
 
@@ -145,7 +147,8 @@ export function ProjectConfigModal({ project, isOpen, onClose, onUpdate }: Proje
                 channel_info: channelInfo,
 
                 keywords: keywords,
-                // animation_prompts: animationPrompts // Disabled to fix schema cache error (column missing in DB)
+                animation_prompts: animationPrompts,
+                default_animation_type_id: defaultAnimationTypeId,
             };
 
             // Only update credentials if inputs are touched/valid
@@ -867,8 +870,18 @@ export function ProjectConfigModal({ project, isOpen, onClose, onUpdate }: Proje
 
                                 <div className="space-y-4">
                                     {animationPrompts.map((prompt, index) => (
-                                        <div key={prompt.id} className="p-4 bg-card border border-border rounded-xl space-y-3">
+                                        <div key={prompt.id} className={`p-4 bg-card border rounded-xl space-y-3 ${defaultAnimationTypeId === prompt.id ? 'border-primary/50 ring-1 ring-primary/20' : 'border-border'}`}>
                                             <div className="flex items-center gap-3">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setDefaultAnimationTypeId(prompt.id)}
+                                                    className={`flex-shrink-0 w-5 h-5 rounded-full border-2 transition-colors flex items-center justify-center ${defaultAnimationTypeId === prompt.id ? 'border-primary bg-primary text-white' : 'border-muted hover:border-primary/50'}`}
+                                                    title={defaultAnimationTypeId === prompt.id ? 'Default type' : 'Set as default'}
+                                                >
+                                                    {defaultAnimationTypeId === prompt.id && (
+                                                        <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" /></svg>
+                                                    )}
+                                                </button>
                                                 <input
                                                     type="text"
                                                     value={prompt.name}
@@ -880,6 +893,9 @@ export function ProjectConfigModal({ project, isOpen, onClose, onUpdate }: Proje
                                                     className="font-medium bg-transparent border-none focus:ring-0 p-0 text-foreground w-full"
                                                     placeholder="Type Name (e.g. Zoom In)"
                                                 />
+                                                {defaultAnimationTypeId === prompt.id && (
+                                                    <span className="text-[10px] font-semibold uppercase tracking-wider text-primary bg-primary/10 px-2 py-0.5 rounded-full flex-shrink-0">Default</span>
+                                                )}
                                                 <button
                                                     type="button"
                                                     onClick={() => {
@@ -887,8 +903,11 @@ export function ProjectConfigModal({ project, isOpen, onClose, onUpdate }: Proje
                                                         const newPrompts = [...animationPrompts];
                                                         newPrompts.splice(index, 1);
                                                         setAnimationPrompts(newPrompts);
+                                                        if (defaultAnimationTypeId === prompt.id && newPrompts.length > 0) {
+                                                            setDefaultAnimationTypeId(newPrompts[0].id);
+                                                        }
                                                     }}
-                                                    className="text-muted hover:text-red-500"
+                                                    className="text-muted hover:text-red-500 flex-shrink-0"
                                                 >
                                                     <Trash2 className="w-4 h-4" />
                                                 </button>

@@ -66,6 +66,7 @@ export interface Project {
     name: string;
     prompt: string;
   }[];
+  default_animation_type_id?: string;
 }
 
 export interface VideoJob {

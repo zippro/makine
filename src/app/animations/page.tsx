@@ -43,8 +43,8 @@ export default function AnimationsPage() {
     const [expandedPromptId, setExpandedPromptId] = useState<string | null>(null);
 
     // Reanimate Modal State
-    const [reanimateModal, setReanimateModal] = useState<{ isOpen: boolean; animation: Animation | null; prompt: string; generating: boolean }>(
-        { isOpen: false, animation: null, prompt: '', generating: false }
+    const [reanimateModal, setReanimateModal] = useState<{ isOpen: boolean; animation: Animation | null; prompt: string; generating: boolean; selectedTypeId: string }>(
+        { isOpen: false, animation: null, prompt: '', generating: false, selectedTypeId: '' }
     );
 
     // Modal State
@@ -328,11 +328,13 @@ export default function AnimationsPage() {
             alert('No source image found for this animation.');
             return;
         }
+        const defaultTypeId = currentProject?.default_animation_type_id || currentProject?.animation_prompts?.[0]?.id || '';
         setReanimateModal({
             isOpen: true,
             animation,
             prompt: animation.prompt || '',
             generating: false,
+            selectedTypeId: defaultTypeId,
         });
     };
 
@@ -340,10 +342,15 @@ export default function AnimationsPage() {
         if (!reanimateModal.animation?.images?.url) return;
         setReanimateModal(prev => ({ ...prev, generating: true }));
         try {
+            // Find the selected type's prompt template
+            const selectedType = currentProject?.animation_prompts?.find(p => p.id === reanimateModal.selectedTypeId);
             const res = await fetch('/api/animations/generate-prompt', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ image_url: reanimateModal.animation.images.url }),
+                body: JSON.stringify({
+                    image_url: reanimateModal.animation.images.url,
+                    animation_prompt: selectedType?.prompt || '',
+                }),
             });
             if (!res.ok) throw new Error('Failed to generate prompt');
             const data = await res.json();
@@ -374,7 +381,8 @@ export default function AnimationsPage() {
             });
             if (!resetRes.ok) throw new Error('Failed to reset animation status');
 
-            // Trigger generation with the user's prompt
+            // Trigger generation with the user's prompt and selected type
+            const selectedType = currentProject?.animation_prompts?.find(p => p.id === reanimateModal.selectedTypeId);
             fetch('/api/animations/generate', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -383,6 +391,7 @@ export default function AnimationsPage() {
                     image_url: animation.images.url,
                     duration: animation.duration,
                     prompt: reanimateModal.prompt,
+                    animation_prompt: selectedType?.prompt || '',
                 }),
             }).catch(err => console.error('Reanimate request failed:', err));
 
@@ -1067,7 +1076,7 @@ export default function AnimationsPage() {
             {reanimateModal.isOpen && reanimateModal.animation && (
                 <div
                     className="fixed inset-0 bg-black/80 backdrop-blur-xl z-50 flex items-start justify-center p-4 pt-20 animate-in fade-in duration-200"
-                    onClick={() => setReanimateModal({ isOpen: false, animation: null, prompt: '', generating: false })}
+                    onClick={() => setReanimateModal({ isOpen: false, animation: null, prompt: '', generating: false, selectedTypeId: '' })}
                 >
                     <div
                         className="relative w-full max-w-lg bg-zinc-900 rounded-2xl overflow-hidden shadow-2xl border border-white/10"
@@ -1080,7 +1089,7 @@ export default function AnimationsPage() {
                                 Reanimate
                             </h3>
                             <button
-                                onClick={() => setReanimateModal({ isOpen: false, animation: null, prompt: '', generating: false })}
+                                onClick={() => setReanimateModal({ isOpen: false, animation: null, prompt: '', generating: false, selectedTypeId: '' })}
                                 className="p-1.5 rounded-lg hover:bg-white/10 text-gray-400 hover:text-white transition-colors"
                             >
                                 <X className="w-5 h-5" />
@@ -1095,6 +1104,30 @@ export default function AnimationsPage() {
                                     alt="Source image"
                                     className="w-full h-40 object-cover rounded-lg border border-white/10"
                                 />
+                            </div>
+                        )}
+
+                        {/* Animation Type Selector */}
+                        {currentProject?.animation_prompts && currentProject.animation_prompts.length > 0 && (
+                            <div className="px-4 pt-3">
+                                <label className="text-xs font-medium text-gray-400 block mb-1.5">Animation Type</label>
+                                <div className="flex flex-wrap gap-2">
+                                    {currentProject.animation_prompts.map((type) => (
+                                        <button
+                                            key={type.id}
+                                            onClick={() => setReanimateModal(prev => ({ ...prev, selectedTypeId: type.id }))}
+                                            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all border ${reanimateModal.selectedTypeId === type.id
+                                                ? 'bg-purple-500/20 border-purple-500/50 text-purple-300'
+                                                : 'bg-white/5 border-white/10 text-gray-400 hover:bg-white/10 hover:text-gray-300'
+                                                }`}
+                                        >
+                                            {type.name}
+                                            {currentProject.default_animation_type_id === type.id && (
+                                                <span className="ml-1 text-[9px] opacity-60">★</span>
+                                            )}
+                                        </button>
+                                    ))}
+                                </div>
                             </div>
                         )}
 
@@ -1130,7 +1163,7 @@ export default function AnimationsPage() {
                         {/* Actions */}
                         <div className="flex items-center gap-3 p-4 border-t border-white/10 bg-white/[0.02]">
                             <button
-                                onClick={() => setReanimateModal({ isOpen: false, animation: null, prompt: '', generating: false })}
+                                onClick={() => setReanimateModal({ isOpen: false, animation: null, prompt: '', generating: false, selectedTypeId: '' })}
                                 className="flex-1 py-2.5 rounded-lg bg-white/5 hover:bg-white/10 text-gray-300 text-sm font-medium transition-colors"
                             >
                                 Cancel
