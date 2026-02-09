@@ -292,7 +292,9 @@ export async function getVideoStatus(requestId: string): Promise<VideoStatusResu
         throw new Error('FAL_AI_KEY environment variable is not set');
     }
 
-    const statusUrl = `${settings.video_status_url}/${requestId}`;
+    // Use the /status endpoint to check progress (not the result endpoint)
+    const statusUrl = `${settings.video_status_url}/${requestId}/status`;
+    console.log(`[AI] Checking status at: ${statusUrl}`);
 
     const response = await fetch(statusUrl, {
         method: 'GET',
@@ -301,15 +303,42 @@ export async function getVideoStatus(requestId: string): Promise<VideoStatusResu
         },
     });
 
+    // Handle 400 "Request is still in progress" gracefully
     if (!response.ok) {
-        const error = await response.text();
-        throw new Error(`Fal.ai status check failed: ${response.status} - ${error}`);
+        const errorText = await response.text();
+
+        // Fal.ai returns 400 when request is still being processed
+        if (response.status === 400 && errorText.includes('still in progress')) {
+            console.log(`[AI] Request ${requestId} still in progress (400 response)`);
+            return { status: 'IN_PROGRESS' };
+        }
+
+        throw new Error(`Fal.ai status check failed: ${response.status} - ${errorText}`);
     }
 
     const data = await response.json();
 
     // Map Fal.ai response to our interface
     if (data.status === 'COMPLETED') {
+        // When completed, fetch the actual result from the response URL
+        const resultUrl = `${settings.video_status_url}/${requestId}`;
+        console.log(`[AI] Fetching result from: ${resultUrl}`);
+
+        const resultResponse = await fetch(resultUrl, {
+            method: 'GET',
+            headers: {
+                'Authorization': `Key ${falApiKey}`,
+            },
+        });
+
+        if (resultResponse.ok) {
+            const resultData = await resultResponse.json();
+            return {
+                status: 'COMPLETED',
+                videoUrl: resultData.video?.url || resultData.output?.video?.url || data.video?.url,
+            };
+        }
+
         return {
             status: 'COMPLETED',
             videoUrl: data.video?.url || data.output?.video?.url,
