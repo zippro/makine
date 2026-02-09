@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Sparkles, Wand2, Upload, Music, Type, Loader2, GripVertical, X, Plus, AlertCircle, FolderOpen, Video, Settings, Check } from 'lucide-react';
+import { Sparkles, Wand2, Upload, Music, Type, Loader2, GripVertical, X, Plus, AlertCircle, FolderOpen, Video, Settings, Check, Image as ImageIcon } from 'lucide-react';
 import { useProject } from '@/context/ProjectContext';
 import { createClient } from '@/lib/supabase/client';
 import { ProjectConfigModal } from '@/components/ProjectConfigModal';
@@ -16,6 +16,14 @@ interface Animation {
   is_approved: boolean;
   video_usage_count: number;
   images: { url: string; filename: string } | null;
+  folder?: string;
+  created_at?: string;
+}
+
+interface ProjectImage {
+  id: string;
+  url: string;
+  filename: string;
   folder?: string;
   created_at?: string;
 }
@@ -43,11 +51,14 @@ export default function Home() {
   const [error, setError] = useState('');
   const [showAnimationPicker, setShowAnimationPicker] = useState(false);
   const [showMusicPicker, setShowMusicPicker] = useState(false);
+  const [showImagePicker, setShowImagePicker] = useState(false);
+  const [projectImages, setProjectImages] = useState<ProjectImage[]>([]);
   const [draggedMusicIndex, setDraggedMusicIndex] = useState<number | null>(null);
 
   // Folder State
   const [currentMusicFolder, setCurrentMusicFolder] = useState<string>('/');
   const [currentAnimFolder, setCurrentAnimFolder] = useState<string>('/');
+  const [currentImageFolder, setCurrentImageFolder] = useState<string>('/');
 
   const getFolderContents = (items: any[], folder: string) => {
     return items.filter(i => (i.folder || '/') === folder);
@@ -151,6 +162,21 @@ export default function Home() {
     fetchData();
   }, [currentProject]);
 
+  // Fetch images when image picker opens
+  useEffect(() => {
+    if (!showImagePicker || !currentProject) return;
+    const fetchImages = async () => {
+      const supabase = createClient();
+      const { data } = await supabase
+        .from('images')
+        .select('id, url, filename, folder, created_at')
+        .eq('project_id', currentProject.id)
+        .order('created_at', { ascending: false });
+      if (data) setProjectImages(data);
+    };
+    fetchImages();
+  }, [showImagePicker, currentProject]);
+
   const handleMusicSelect = (track: MusicTrack) => {
     setSelectedMusic(prev => {
       const exists = prev.find(t => t.id === track.id);
@@ -219,13 +245,6 @@ export default function Home() {
 
     const supabase = createClient();
     const currentAssets = (currentProject as any).template_assets || [];
-    // Check by URL to allow duplicates? No, usually distinct items. 
-    // But for playlist, maybe duplicates allowed? 
-    // AssetPlaylistEditor logic generates new ID for every add.
-    // HERE, we are toggling from picker. 
-    // If we want to allow multiples, "Toggle" is wrong. It should be "Add".
-    // But picker UI usually implies selection state.
-    // Let's treat it as ADD. Always add.
 
     const newAsset = {
       id: crypto.randomUUID(),
@@ -233,6 +252,31 @@ export default function Home() {
       url: anim.url,
       duration: 10,
       loop_count: (currentProject as any).default_loop_count || 1
+    };
+
+    const newAssets = [...currentAssets, newAsset];
+
+    const { data } = await supabase
+      .from("projects")
+      .update({ template_assets: newAssets })
+      .eq("id", currentProject.id)
+      .select()
+      .single();
+
+    if (data) refreshProjects();
+  };
+
+  const addImageToPlaylist = async (img: ProjectImage) => {
+    if (!currentProject) return;
+
+    const supabase = createClient();
+    const currentAssets = (currentProject as any).template_assets || [];
+
+    const newAsset = {
+      id: crypto.randomUUID(),
+      type: 'image',
+      url: img.url,
+      duration: (currentProject as any).default_image_duration || 15
     };
 
     const newAssets = [...currentAssets, newAsset];
@@ -381,6 +425,7 @@ export default function Home() {
                           refreshProjects();
                         }}
                         onAddAnimation={() => setShowAnimationPicker(true)}
+                        onAddImage={() => { setCurrentImageFolder('/'); setShowImagePicker(true); }}
                       />
                     </div>
                   </div>
@@ -571,6 +616,119 @@ export default function Home() {
                     </button>
                   );
                 })}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Image Picker Modal */}
+      {showImagePicker && (
+        <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4">
+          <div className="bg-card rounded-2xl max-w-4xl w-full max-h-[80vh] overflow-hidden flex flex-col">
+            <div className="p-4 border-b border-border flex items-center justify-between">
+              <div className="flex items-center gap-2 overflow-hidden">
+                <h2 className="text-lg font-semibold text-foreground whitespace-nowrap">Select Image</h2>
+                <div className="flex items-center gap-1 text-muted-foreground text-sm overflow-hidden text-ellipsis">
+                  <span className="mx-1">/</span>
+                  {currentImageFolder !== '/' && (
+                    <button onClick={() => setCurrentImageFolder(currentImageFolder.split('/').slice(0, -1).join('/') || '/')} className="hover:text-foreground hover:underline">
+                      ...
+                    </button>
+                  )}
+                  <span className="font-mono">{currentImageFolder}</span>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                {currentImageFolder !== '/' && (
+                  <button onClick={() => setCurrentImageFolder(currentImageFolder.split('/').slice(0, -1).join('/') || '/')} className="p-2 bg-muted/50 rounded-lg hover:bg-muted">
+                    Up
+                  </button>
+                )}
+                <label className="p-2 bg-primary/10 text-primary rounded-lg hover:bg-primary/20 cursor-pointer">
+                  <Upload className="w-5 h-5" />
+                  <input type="file" accept="image/*" className="hidden" onChange={async (e) => {
+                    if (!e.target.files || !e.target.files.length || !currentProject) return;
+                    const file = e.target.files[0];
+                    setIsLoading(true);
+                    try {
+                      const formData = new FormData();
+                      formData.append('file', file);
+                      formData.append('project_id', currentProject.id);
+                      const res = await fetch('/api/upload', { method: 'POST', body: formData });
+                      if (!res.ok) throw new Error('Upload failed');
+                      const { url: publicUrl } = await res.json();
+                      // Save to images table
+                      const supabase = createClient();
+                      await supabase.from('images').insert({
+                        url: publicUrl,
+                        filename: file.name,
+                        project_id: currentProject.id,
+                        folder: currentImageFolder,
+                      });
+                      // Refresh images
+                      const { data } = await supabase
+                        .from('images')
+                        .select('id, url, filename, folder, created_at')
+                        .eq('project_id', currentProject.id)
+                        .order('created_at', { ascending: false });
+                      if (data) setProjectImages(data);
+                    } catch (err: any) {
+                      alert('Upload failed: ' + err.message);
+                    } finally {
+                      setIsLoading(false);
+                    }
+                  }} />
+                </label>
+                <button onClick={() => setShowImagePicker(false)} className="p-2 text-muted hover:text-foreground">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+            <div className="p-4 overflow-y-auto max-h-[60vh]">
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                {/* Folders */}
+                {(() => {
+                  const subfolders = getSubfolders(projectImages, currentImageFolder);
+                  return subfolders.sort().map(folderPath => {
+                    const folderName = folderPath.split('/').pop();
+                    return (
+                      <button key={folderPath} onDoubleClick={() => setCurrentImageFolder(folderPath)} className="group rounded-xl border-2 border-border border-dashed p-4 flex flex-col items-center justify-center gap-3 hover:border-primary/50 hover:bg-primary/5 transition-all">
+                        <FolderOpen className="w-10 h-10 text-primary/50 group-hover:text-primary" />
+                        <span className="text-sm font-medium">{folderName}</span>
+                      </button>
+                    )
+                  });
+                })()}
+
+                {/* Images */}
+                {getFolderContents(projectImages, currentImageFolder).map((img) => (
+                  <button
+                    key={img.id}
+                    onClick={() => addImageToPlaylist(img)}
+                    className="group rounded-xl overflow-hidden border-2 transition-all relative border-border hover:border-primary"
+                  >
+                    <div className="aspect-video bg-black relative">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={img.url}
+                        alt={img.filename}
+                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                      />
+                    </div>
+                    <div className="p-2 bg-card text-left">
+                      <p className="text-sm font-medium truncate">{img.filename}</p>
+                    </div>
+                  </button>
+                ))}
+
+                {getFolderContents(projectImages, currentImageFolder).length === 0 && getSubfolders(projectImages, currentImageFolder).length === 0 && (
+                  <div className="col-span-full py-12 text-center text-muted">
+                    <ImageIcon className="w-12 h-12 mx-auto mb-2 opacity-50" />
+                    <p className="text-sm">No images in this folder.</p>
+                    <p className="text-xs text-muted mt-1">Upload images or go to the Images page to add some.</p>
+                  </div>
+                )}
               </div>
             </div>
           </div>
