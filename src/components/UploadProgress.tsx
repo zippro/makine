@@ -1,6 +1,7 @@
 "use client";
 
-import { Loader2, Trash2, AlertCircle, Check } from 'lucide-react';
+import { useState } from 'react';
+import { Loader2, Trash2, AlertCircle, Check, Sparkles } from 'lucide-react';
 
 export interface UploadStatus {
     id: string;
@@ -18,13 +19,45 @@ interface UploadProgressProps {
     onRemove: (id: string) => void;
     onUpload: () => void;
     onPromptChange: (id: string, prompt: string) => void;
+    onGeneratePrompt?: (id: string, imageDataUrl: string) => Promise<string>;
     uploading: boolean;
 }
 
-export default function UploadProgress({ items, onRemove, onUpload, onPromptChange, uploading }: UploadProgressProps) {
+export default function UploadProgress({ items, onRemove, onUpload, onPromptChange, onGeneratePrompt, uploading }: UploadProgressProps) {
+    const [generatingIds, setGeneratingIds] = useState<Set<string>>(new Set());
+    const [generatingAll, setGeneratingAll] = useState(false);
+
     if (items.length === 0) return null;
 
-    const pendingCount = items.filter(img => img.status === 'pending').length;
+    const pendingItems = items.filter(img => img.status === 'pending');
+    const pendingCount = pendingItems.length;
+
+    const handleGenerateOne = async (item: UploadStatus) => {
+        if (!onGeneratePrompt) return;
+        setGeneratingIds(prev => new Set(prev).add(item.id));
+        try {
+            const prompt = await onGeneratePrompt(item.id, item.preview);
+            onPromptChange(item.id, prompt);
+        } catch (err) {
+            console.error('Failed to generate prompt for', item.id, err);
+        } finally {
+            setGeneratingIds(prev => {
+                const next = new Set(prev);
+                next.delete(item.id);
+                return next;
+            });
+        }
+    };
+
+    const handleGenerateAll = async () => {
+        if (!onGeneratePrompt) return;
+        setGeneratingAll(true);
+        const pending = items.filter(i => i.status === 'pending' && !i.prompt);
+        for (const item of pending) {
+            await handleGenerateOne(item);
+        }
+        setGeneratingAll(false);
+    };
 
     return (
         <div>
@@ -33,6 +66,20 @@ export default function UploadProgress({ items, onRemove, onUpload, onPromptChan
                     {items.length} image{items.length !== 1 ? 's' : ''} selected
                 </h2>
                 <div className="flex gap-3">
+                    {pendingCount > 0 && onGeneratePrompt && (
+                        <button
+                            onClick={handleGenerateAll}
+                            disabled={uploading || generatingAll}
+                            className="px-4 py-2 rounded-lg flex items-center gap-2 bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 border border-purple-500/20 text-sm font-medium transition-all disabled:opacity-50"
+                        >
+                            {generatingAll ? (
+                                <Loader2 className="w-4 h-4 animate-spin" />
+                            ) : (
+                                <Sparkles className="w-4 h-4" />
+                            )}
+                            {generatingAll ? 'Generating...' : `Generate All Prompts`}
+                        </button>
+                    )}
                     {pendingCount > 0 && (
                         <button
                             onClick={onUpload}
@@ -117,10 +164,27 @@ export default function UploadProgress({ items, onRemove, onUpload, onPromptChan
 
                         {/* Prompt Input */}
                         {item.status === 'pending' && (
-                            <div className="p-3 bg-card border-t border-border">
+                            <div className="p-3 bg-card border-t border-border space-y-2">
+                                <div className="flex items-center justify-between">
+                                    <span className="text-[10px] text-gray-500 font-medium uppercase tracking-wider">Prompt</span>
+                                    {onGeneratePrompt && (
+                                        <button
+                                            onClick={() => handleGenerateOne(item)}
+                                            disabled={generatingIds.has(item.id)}
+                                            className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 text-[10px] font-medium transition-all disabled:opacity-50"
+                                        >
+                                            {generatingIds.has(item.id) ? (
+                                                <Loader2 className="w-3 h-3 animate-spin" />
+                                            ) : (
+                                                <Sparkles className="w-3 h-3" />
+                                            )}
+                                            {generatingIds.has(item.id) ? 'AI...' : 'AI Generate'}
+                                        </button>
+                                    )}
+                                </div>
                                 <textarea
-                                    className="w-full bg-zinc-800 border border-zinc-700 rounded-lg p-2 text-xs text-gray-200 placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-primary resize-none"
-                                    placeholder="Add extra words to support video prompt..."
+                                    className="w-full bg-zinc-800 border border-zinc-700 rounded-lg p-2 text-xs text-gray-200 placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-purple-500/50 resize-none"
+                                    placeholder="Describe how to animate this image, or click AI Generate..."
                                     rows={2}
                                     value={item.prompt || ''}
                                     onChange={(e) => onPromptChange(item.id, e.target.value)}

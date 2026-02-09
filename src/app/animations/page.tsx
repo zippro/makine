@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
-import { Check, Trash2, Loader2, Video, AlertCircle, ChevronDown, ChevronUp, Play, X, FolderOpen, Edit2, RotateCcw } from 'lucide-react';
+import { Check, Trash2, Loader2, Video, AlertCircle, ChevronDown, ChevronUp, Play, X, FolderOpen, Edit2, RotateCcw, Sparkles } from 'lucide-react';
 import { useProject } from '@/context/ProjectContext';
 import { VideoDetailsModal } from '@/components/VideoDetailsModal';
 import { MoveAssetModal } from '@/components/MoveAssetModal';
@@ -41,6 +41,11 @@ export default function AnimationsPage() {
     const [updatingId, setUpdatingId] = useState<string | null>(null);
     const [reanimatingId, setReanimatingId] = useState<string | null>(null);
     const [expandedPromptId, setExpandedPromptId] = useState<string | null>(null);
+
+    // Reanimate Modal State
+    const [reanimateModal, setReanimateModal] = useState<{ isOpen: boolean; animation: Animation | null; prompt: string; generating: boolean }>(
+        { isOpen: false, animation: null, prompt: '', generating: false }
+    );
 
     // Modal State
     const [detailsModalOpen, setDetailsModalOpen] = useState(false);
@@ -318,13 +323,43 @@ export default function AnimationsPage() {
         setEditSpeed(animation.speed_multiplier);
     };
 
-    const handleReanimate = async (animation: Animation) => {
+    const openReanimateModal = (animation: Animation) => {
         if (!animation.images?.url) {
             alert('No source image found for this animation.');
             return;
         }
-        if (!confirm('Reanimate this image? This will generate a new video.')) return;
+        setReanimateModal({
+            isOpen: true,
+            animation,
+            prompt: animation.prompt || '',
+            generating: false,
+        });
+    };
 
+    const generatePromptForReanimate = async () => {
+        if (!reanimateModal.animation?.images?.url) return;
+        setReanimateModal(prev => ({ ...prev, generating: true }));
+        try {
+            const res = await fetch('/api/animations/generate-prompt', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ image_url: reanimateModal.animation.images.url }),
+            });
+            if (!res.ok) throw new Error('Failed to generate prompt');
+            const data = await res.json();
+            setReanimateModal(prev => ({ ...prev, prompt: data.prompt, generating: false }));
+        } catch (err) {
+            console.error('Error generating prompt:', err);
+            alert('Failed to generate prompt.');
+            setReanimateModal(prev => ({ ...prev, generating: false }));
+        }
+    };
+
+    const handleReanimateSubmit = async () => {
+        const animation = reanimateModal.animation;
+        if (!animation?.images?.url) return;
+
+        setReanimateModal(prev => ({ ...prev, isOpen: false }));
         setReanimatingId(animation.id);
         try {
             // Reset status to processing
@@ -339,7 +374,7 @@ export default function AnimationsPage() {
             });
             if (!resetRes.ok) throw new Error('Failed to reset animation status');
 
-            // Trigger generation
+            // Trigger generation with the user's prompt
             fetch('/api/animations/generate', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -347,6 +382,7 @@ export default function AnimationsPage() {
                     animation_id: animation.id,
                     image_url: animation.images.url,
                     duration: animation.duration,
+                    prompt: reanimateModal.prompt,
                 }),
             }).catch(err => console.error('Reanimate request failed:', err));
 
@@ -916,7 +952,7 @@ export default function AnimationsPage() {
                                             {/* Reanimate Button */}
                                             {animation.images?.url && (animation.status === 'done' || animation.status === 'error') && (
                                                 <button
-                                                    onClick={() => handleReanimate(animation)}
+                                                    onClick={() => openReanimateModal(animation)}
                                                     disabled={reanimatingId === animation.id}
                                                     className="p-2 rounded-lg text-gray-400 hover:text-purple-400 hover:bg-purple-500/10 transition-colors flex items-center gap-1"
                                                     title="Reanimate"
@@ -1026,6 +1062,91 @@ export default function AnimationsPage() {
                     }
                 }}
             />
+
+            {/* Reanimate Prompt Modal */}
+            {reanimateModal.isOpen && reanimateModal.animation && (
+                <div
+                    className="fixed inset-0 bg-black/80 backdrop-blur-xl z-50 flex items-start justify-center p-4 pt-20 animate-in fade-in duration-200"
+                    onClick={() => setReanimateModal({ isOpen: false, animation: null, prompt: '', generating: false })}
+                >
+                    <div
+                        className="relative w-full max-w-lg bg-zinc-900 rounded-2xl overflow-hidden shadow-2xl border border-white/10"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        {/* Header */}
+                        <div className="flex items-center justify-between p-4 border-b border-white/10">
+                            <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+                                <RotateCcw className="w-5 h-5 text-purple-400" />
+                                Reanimate
+                            </h3>
+                            <button
+                                onClick={() => setReanimateModal({ isOpen: false, animation: null, prompt: '', generating: false })}
+                                className="p-1.5 rounded-lg hover:bg-white/10 text-gray-400 hover:text-white transition-colors"
+                            >
+                                <X className="w-5 h-5" />
+                            </button>
+                        </div>
+
+                        {/* Image Preview */}
+                        {reanimateModal.animation.images?.url && (
+                            <div className="px-4 pt-4">
+                                <img
+                                    src={reanimateModal.animation.images.url}
+                                    alt="Source image"
+                                    className="w-full h-40 object-cover rounded-lg border border-white/10"
+                                />
+                            </div>
+                        )}
+
+                        {/* Prompt Input */}
+                        <div className="p-4 space-y-3">
+                            <div className="flex items-center justify-between">
+                                <label className="text-sm font-medium text-gray-300">Animation Prompt</label>
+                                <button
+                                    onClick={generatePromptForReanimate}
+                                    disabled={reanimateModal.generating}
+                                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 hover:text-purple-200 border border-purple-500/20 text-xs font-medium transition-all disabled:opacity-50"
+                                >
+                                    {reanimateModal.generating ? (
+                                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                    ) : (
+                                        <Sparkles className="w-3.5 h-3.5" />
+                                    )}
+                                    {reanimateModal.generating ? 'Generating...' : 'AI Generate'}
+                                </button>
+                            </div>
+                            <textarea
+                                className="w-full bg-zinc-800 border border-zinc-700 rounded-lg p-3 text-sm text-gray-200 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-purple-500/50 resize-none"
+                                placeholder="Describe how you want this image to be animated..."
+                                rows={4}
+                                value={reanimateModal.prompt}
+                                onChange={(e) => setReanimateModal(prev => ({ ...prev, prompt: e.target.value }))}
+                            />
+                            <p className="text-xs text-gray-500">
+                                Edit the prompt above or click &quot;AI Generate&quot; to create one from the image.
+                            </p>
+                        </div>
+
+                        {/* Actions */}
+                        <div className="flex items-center gap-3 p-4 border-t border-white/10 bg-white/[0.02]">
+                            <button
+                                onClick={() => setReanimateModal({ isOpen: false, animation: null, prompt: '', generating: false })}
+                                className="flex-1 py-2.5 rounded-lg bg-white/5 hover:bg-white/10 text-gray-300 text-sm font-medium transition-colors"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={handleReanimateSubmit}
+                                disabled={!reanimateModal.prompt.trim()}
+                                className="flex-1 py-2.5 rounded-lg bg-purple-600 hover:bg-purple-500 text-white text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                            >
+                                <RotateCcw className="w-4 h-4" />
+                                Reanimate
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

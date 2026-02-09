@@ -170,6 +170,31 @@ export default function UploadImagesPage() {
         ));
     };
 
+    const handleGeneratePrompt = async (id: string, previewUrl: string): Promise<string> => {
+        // Convert blob URL to data URL for the API
+        const response = await fetch(previewUrl);
+        const blob = await response.blob();
+        const dataUrl = await new Promise<string>((resolve) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result as string);
+            reader.readAsDataURL(blob);
+        });
+
+        const res = await fetch('/api/animations/generate-prompt', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ image_url: dataUrl }),
+        });
+
+        if (!res.ok) {
+            const err = await res.json();
+            throw new Error(err.error || 'Failed to generate prompt');
+        }
+
+        const data = await res.json();
+        return data.prompt;
+    };
+
     const uploadAndGenerate = async () => {
         if (!currentProject) return;
         setUploading(true);
@@ -534,6 +559,7 @@ export default function UploadImagesPage() {
                         items={progress}
                         onRemove={removeImage}
                         onPromptChange={handlePromptChange}
+                        onGeneratePrompt={handleGeneratePrompt}
                         onUpload={uploadAndGenerate}
                         uploading={uploading}
                     />
