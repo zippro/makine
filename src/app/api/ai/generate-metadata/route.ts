@@ -1,10 +1,31 @@
 import { NextRequest, NextResponse } from 'next/server';
 import OpenAI from 'openai';
 
-export const maxDuration = 60; // Allow longer generation time
+export const maxDuration = 60;
+
+// Shared prompt builder — used by both local OpenAI and N8n paths
+function buildMetadataPrompt(videoTitle: string, channelInfo: string, keywords: string): string {
+    return `You are a real YouTube creator writing metadata for your own video. Write like a human, not a marketing bot.
+
+Video name: ${videoTitle || 'Music Video'}
+Channel: ${channelInfo || 'Music Channel'}
+Topics/keywords to work in naturally: ${keywords || 'music, video, visualizer'}
+
+Write a JSON object with title, description, and tags for this YouTube video.
+
+RULES — follow these strictly:
+- Title (max 80 chars): Make it catchy but real. Write like you'd actually name your own video. Don't use all-caps words. Don't start with "Discover" or "Unleash" or any AI-sounding word. Keep it simple and interesting.
+- Description (3-5 lines max): Write casually, like you're telling a friend about the video. First line should hook attention. Work in 2-3 of the keywords but don't force them. End with 2-3 hashtags. Do NOT write in bullet points. Do NOT use phrases like "immerse yourself", "dive into", "embark on a journey", "experience the magic" — these scream AI.
+- Tags (comma-separated string, 8-12 tags): Mix of broad terms and specific ones people would actually search. No generic spam.
+
+NEVER include the words "AI", "generated", "created by AI", or anything similar in the title, description, or tags.
+Keep the overall vibe natural. Vary your sentence lengths. It's okay to be a bit casual or use short sentences.
+
+Output ONLY valid JSON:
+{ "title": "string", "description": "string", "tags": "string" }`;
+}
 
 export async function POST(request: NextRequest) {
-    // Initialize OpenAI client inside handler to avoid build-time errors if env var is missing
     const openai = new OpenAI({
         apiKey: process.env.OPENAI_API_KEY,
     });
@@ -12,9 +33,7 @@ export async function POST(request: NextRequest) {
     try {
         const { image_url, channel_info, keywords, video_title } = await request.json();
 
-        if (!image_url) {
-            return NextResponse.json({ error: 'Image URL is required' }, { status: 400 });
-        }
+        const prompt = buildMetadataPrompt(video_title, channel_info, keywords);
 
         // Feature Flag: N8n Webhook
         const n8nWebhookUrl = process.env.N8N_WEBHOOK_URL;
@@ -29,19 +48,7 @@ export async function POST(request: NextRequest) {
                     channel_info,
                     keywords,
                     video_title,
-                    prompt: `
-                        You are a YouTube Growth Expert and SEO Specialist.
-                        Task: Generate metadata for a YouTube video based on the provided image and context.
-                        Context:
-                        - Video Title/Topic: ${video_title || 'Unknown'}
-                        - Channel Info: ${channel_info || 'General Music Channel'}
-                        - Target Keywords: ${keywords || 'Music, Video, Visualizer'}
-                        Requirements:
-                        1. Title: Clickbait but relevant, high CTR, includes main keyword. (Max 60 chars preferred).
-                        2. Description: SEO-optimized. First 2 lines are the "hook". Include keywords naturally. Add 3 hashtags.
-                        3. Tags: 15-20 comma-separated high-volume tags mixed with long-tail tags.
-                        Output Format (JSON only): { "title": "string", "description": "string", "tags": "string" }
-                    `
+                    prompt
                 })
             });
 
@@ -49,65 +56,25 @@ export async function POST(request: NextRequest) {
                 throw new Error(`N8n Webhook failed: ${n8nResponse.statusText}`);
             }
 
-            // Expecting N8n to return the JSON directly or inside a structure we handle
-            // Modify this based on actual N8n output structure if known. 
-            // Assuming the workflow returns the OpenAI JSON content directly.
             const data = await n8nResponse.json();
-
-            // Handle if N8n wraps it (common in N8n respond node)
-            // If data is { title: ... } return it.
-            // If data is [{ body: { ... } }] or similar, parse it.
-            // For now, assume direct JSON object mapping or simple wrap.
-            // Let's assume the N8n 'Respond to Webhook' mode 'json' returns the object.
-
             return NextResponse.json(data);
         }
 
-        // FALLBACK: Local OpenAI Call
-        const prompt = `
-        You are a YouTube Growth Expert and SEO Specialist.
-        
-        Task: Generate metadata for a YouTube video based on the provided image and context.
-        
-        Context:
-        - Video Title/Topic: ${video_title || 'Unknown'}
-        - Channel Info: ${channel_info || 'General Music Channel'}
-        - Target Keywords: ${keywords || 'Music, Video, Visualizer'}
-        
-        Requirements:
-        1. Title: Clickbait but relevant, high CTR, includes main keyword. (Max 60 chars preferred, up to 100).
-        2. Description: SEO-optimized. First 2 lines are the "hook". Include keywords naturally. Add 3 hashtags at the end.
-        3. Tags: 15-20 comma-separated high-volume tags mixed with long-tail tags.
-        
-        Output Format (JSON only):
-        {
-            "title": "string",
-            "description": "string",
-            "tags": "string"
-        }
-        `;
-
+        // Local OpenAI Call — using gpt-4o-mini (fast, cheap, no vision needed)
         const response = await openai.chat.completions.create({
-            model: "gpt-4o",
+            model: "gpt-4o-mini",
             messages: [
                 {
                     role: "system",
-                    content: "You are a helpful assistant that outputs JSON."
+                    content: "You output valid JSON only. No extra text."
                 },
                 {
                     role: "user",
-                    content: [
-                        { type: "text", text: prompt },
-                        {
-                            type: "image_url",
-                            image_url: {
-                                "url": image_url,
-                            },
-                        },
-                    ],
+                    content: prompt,
                 },
             ],
             response_format: { type: "json_object" },
+            temperature: 0.9, // Higher temp = more varied, less robotic output
         });
 
         const content = response.choices[0].message.content;
