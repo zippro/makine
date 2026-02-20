@@ -35,8 +35,8 @@ export async function POST(request: NextRequest) {
 
         const prompt = buildMetadataPrompt(video_title, channel_info, keywords);
 
-        // Feature Flag: N8n Webhook
-        const n8nWebhookUrl = process.env.N8N_WEBHOOK_URL;
+        // Feature Flag: Dedicated N8n Metadata Webhook (separate from video creation webhook)
+        const n8nWebhookUrl = process.env.N8N_METADATA_WEBHOOK_URL;
 
         if (n8nWebhookUrl) {
             console.log("Delegating generation to N8n:", n8nWebhookUrl);
