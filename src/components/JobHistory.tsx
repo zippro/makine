@@ -2,12 +2,13 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Clock, Play, RefreshCw, Trash2, Youtube } from 'lucide-react';
+import { Clock, Play, RefreshCw, Trash2, Youtube, Loader2 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { JobStatusBadge } from './JobStatus';
 import type { VideoJob } from '@/lib/types';
 import YouTubePublishModal from './YouTubePublishModal';
 import { useProject } from '@/context/ProjectContext';
+import { useUploadQueue } from '@/context/UploadQueueContext';
 
 interface JobHistoryProps {
     limit?: number;
@@ -15,6 +16,7 @@ interface JobHistoryProps {
 
 export function JobHistory({ limit }: JobHistoryProps) {
     const { currentProject } = useProject();
+    const { isUploading } = useUploadQueue();
 
     const isVideoFile = (url: string | null) => {
         if (!url) return false;
@@ -303,10 +305,18 @@ export function JobHistory({ limit }: JobHistoryProps) {
                                     e.stopPropagation();
                                     setPublishingJob(job);
                                 }}
-                                className="p-2 rounded-lg bg-red-600/10 text-red-600 hover:bg-red-600/20 transition-colors disabled:opacity-50"
-                                title="Publish to YouTube"
+                                className={`p-2 rounded-lg transition-colors disabled:opacity-50 ${isUploading(job.id)
+                                        ? 'bg-blue-500/10 text-blue-500'
+                                        : 'bg-red-600/10 text-red-600 hover:bg-red-600/20'
+                                    }`}
+                                title={isUploading(job.id) ? "Uploading..." : "Publish to YouTube"}
+                                disabled={isUploading(job.id)}
                             >
-                                <Youtube className="w-4 h-4" />
+                                {isUploading(job.id) ? (
+                                    <Loader2 className="w-4 h-4 animate-spin" />
+                                ) : (
+                                    <Youtube className="w-4 h-4" />
+                                )}
                             </button>
                         )}
                         <button
@@ -330,24 +340,8 @@ export function JobHistory({ limit }: JobHistoryProps) {
                     job={publishingJob}
                     isOpen={!!publishingJob}
                     onClose={() => setPublishingJob(null)}
-                    channelInfo={currentProject?.channel_info} // Pass Project Context
-                    keywords={currentProject?.keywords} // Pass Project Context
-                    onPublish={async (metadata) => {
-                        try {
-                            const res = await fetch(`/api/jobs/${publishingJob.id}/publish`, {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify(metadata)
-                            });
-                            const data = await res.json();
-                            if (!res.ok) throw new Error(data.error);
-
-                            alert(`Published! URL: ${data.url}`);
-                        } catch (err: any) {
-                            alert('Upload Failed: ' + err.message);
-                            throw err; // Propegate to modal validation
-                        }
-                    }}
+                    channelInfo={currentProject?.channel_info}
+                    keywords={currentProject?.keywords}
                 />
             )}
         </div>

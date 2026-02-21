@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 // import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { ProjectProvider } from "@/context/ProjectContext";
+import { UploadQueueProvider } from "@/context/UploadQueueContext";
 import Navigation from "@/components/Navigation";
 import { Footer } from "@/components/Footer";
 
@@ -34,11 +35,13 @@ export default function RootLayout({
         suppressHydrationWarning
       >
         <ProjectProvider>
-          <Navigation />
-          <main className="min-h-screen pt-20 pb-10 px-4 max-w-7xl mx-auto">
-            {children}
-          </main>
-          <Footer />
+          <UploadQueueProvider>
+            <Navigation />
+            <main className="min-h-screen pt-20 pb-10 px-4 max-w-7xl mx-auto">
+              {children}
+            </main>
+            <Footer />
+          </UploadQueueProvider>
         </ProjectProvider>
       </body>
     </html>

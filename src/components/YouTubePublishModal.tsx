@@ -2,15 +2,16 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { X, Upload, Loader2, AlertCircle, CheckCircle, ExternalLink, Youtube, Type, AlignLeft, Tag, Globe, EyeOff, Lock, Calendar, Clock } from 'lucide-react';
+import { X, Upload, Loader2, AlertCircle, CheckCircle, ExternalLink, Youtube, Type, AlignLeft, Tag, Globe, EyeOff, Lock, Calendar, Clock, Save } from 'lucide-react';
 import { useEscapeKey } from '@/hooks/useEscapeKey';
 import { VideoJob } from "@/lib/types";
+import { useUploadQueue } from "@/context/UploadQueueContext";
+import { createClient } from "@/lib/supabase/client";
 
 interface YouTubePublishModalProps {
     job: VideoJob;
     isOpen: boolean;
     onClose: () => void;
-    onPublish: (metadata: YouTubeMetadata) => Promise<void>;
     channelInfo?: string;
     keywords?: string;
 }
@@ -23,27 +24,51 @@ export interface YouTubeMetadata {
     publishAt?: string; // ISO string
 }
 
-export default function YouTubePublishModal({ isOpen, onClose, job, onPublish, channelInfo, keywords }: YouTubePublishModalProps) {
+export default function YouTubePublishModal({ isOpen, onClose, job, channelInfo, keywords }: YouTubePublishModalProps) {
     useEscapeKey(onClose);
-    const [step, setStep] = useState<'details' | 'uploading' | 'success'>('details');
+    const { addUpload, isUploading } = useUploadQueue();
     const [title, setTitle] = useState(job.title_text || "");
-    const [description, setDescription] = useState(`Created with Makine Video AI\nProject: ${job.project_id} \n\n#shorts`);
+    const [description, setDescription] = useState(`Created with Makine Video AI\n\n#shorts`);
     const [tags, setTags] = useState("music,video,ai,generated");
     const [privacyStatus, setPrivacyStatus] = useState<"public" | "private" | "unlisted">("private");
     const [isScheduled, setIsScheduled] = useState(false);
     const [scheduleDate, setScheduleDate] = useState("");
     const [scheduleTime, setScheduleTime] = useState("");
-    const [isLoading, setIsLoading] = useState(false);
     const [isGeneratingAI, setIsGeneratingAI] = useState(false);
+    const [isSaving, setIsSaving] = useState(false);
     const [error, setError] = useState("");
+    const [saveSuccess, setSaveSuccess] = useState(false);
 
-    // Reset form when opening different job
+    // Reset form when opening different job — load saved draft if available
     useEffect(() => {
         if (isOpen) {
-            setTitle(job.title_text || "");
-            const baseDesc = `Created with Makine Video AI\n\n#shorts`;
-            setDescription(baseDesc);
+            const draft = (job as any).youtube_draft;
+            if (draft) {
+                setTitle(draft.title || job.title_text || "");
+                setDescription(draft.description || `Created with Makine Video AI\n\n#shorts`);
+                setTags(Array.isArray(draft.tags) ? draft.tags.join(", ") : draft.tags || "music,video,ai,generated");
+                setPrivacyStatus(draft.privacyStatus || "private");
+                if (draft.publishAt) {
+                    setIsScheduled(true);
+                    const d = new Date(draft.publishAt);
+                    setScheduleDate(d.toISOString().split('T')[0]);
+                    setScheduleTime(d.toTimeString().slice(0, 5));
+                } else {
+                    setIsScheduled(false);
+                    setScheduleDate("");
+                    setScheduleTime("");
+                }
+            } else {
+                setTitle(job.title_text || "");
+                setDescription(`Created with Makine Video AI\n\n#shorts`);
+                setTags("music,video,ai,generated");
+                setPrivacyStatus("private");
+                setIsScheduled(false);
+                setScheduleDate("");
+                setScheduleTime("");
+            }
             setError("");
+            setSaveSuccess(false);
         }
     }, [isOpen, job]);
 
@@ -55,10 +80,9 @@ export default function YouTubePublishModal({ isOpen, onClose, job, onPublish, c
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
-                    image_url: job.thumbnail_url || job.image_url,
                     channel_info: channelInfo,
                     keywords: keywords,
-                    video_title: title // Pass the current title if available
+                    video_title: title
                 })
             });
 
@@ -76,10 +100,46 @@ export default function YouTubePublishModal({ isOpen, onClose, job, onPublish, c
         }
     };
 
-    const handleSubmit = async (e: React.FormEvent) => {
+    // ─── Save Draft ──────────────────────────────────────────────────────────
+    const handleSaveDraft = async () => {
+        setIsSaving(true);
+        setError("");
+        setSaveSuccess(false);
+        try {
+            let publishAt: string | undefined;
+            if (isScheduled && scheduleDate && scheduleTime) {
+                publishAt = new Date(`${scheduleDate}T${scheduleTime}`).toISOString();
+            }
+
+            const draft = {
+                title,
+                description,
+                tags: tags.split(",").map(t => t.trim()).filter(Boolean),
+                privacyStatus: isScheduled ? "private" : privacyStatus,
+                publishAt,
+            };
+
+            const supabase = createClient();
+            const { error: updateError } = await supabase
+                .from("video_jobs")
+                .update({ youtube_draft: draft })
+                .eq("id", job.id);
+
+            if (updateError) throw updateError;
+
+            setSaveSuccess(true);
+            setTimeout(() => setSaveSuccess(false), 2000);
+        } catch (err: any) {
+            setError(err.message || "Failed to save draft");
+        } finally {
+            setIsSaving(false);
+        }
+    };
+
+    // ─── Publish (Background) ────────────────────────────────────────────────
+    const handlePublish = async (e: React.FormEvent) => {
         e.preventDefault();
         setError("");
-        setIsLoading(true);
 
         try {
             let publishAt: string | undefined;
@@ -88,33 +148,39 @@ export default function YouTubePublishModal({ isOpen, onClose, job, onPublish, c
                 if (!scheduleDate || !scheduleTime) {
                     throw new Error("Please select both date and time for scheduling.");
                 }
-                const date = new Date(`${scheduleDate}T${scheduleTime} `);
+                const date = new Date(`${scheduleDate}T${scheduleTime}`);
                 if (date <= new Date()) {
                     throw new Error("Schedule time must be in the future.");
                 }
                 publishAt = date.toISOString();
             }
 
-            // Validating logic: If scheduled, must be private per YouTube API usually, 
-            // but we will let the API handler enforce strictness or we enforce it here.
-            // Generally for API: status.publishAt needs status.privacyStatus='private'.
-
             const finalPrivacy = isScheduled ? "private" : privacyStatus;
 
-            await onPublish({
+            const metadata = {
                 title,
                 description,
                 tags: tags.split(",").map(t => t.trim()).filter(Boolean),
-                privacyStatus: finalPrivacy,
-                publishAt
-            });
+                privacyStatus: finalPrivacy as "public" | "private" | "unlisted",
+                publishAt,
+            };
+
+            // Save draft first
+            const supabase = createClient();
+            await supabase
+                .from("video_jobs")
+                .update({ youtube_draft: metadata })
+                .eq("id", job.id);
+
+            // Add to background upload queue — this closes the modal
+            addUpload(job.id, title, metadata);
             onClose();
         } catch (err) {
             setError((err as Error).message);
-        } finally {
-            setIsLoading(false);
         }
     };
+
+    const jobIsUploading = isUploading(job.id);
 
     if (!isOpen) return null;
 
@@ -139,7 +205,6 @@ export default function YouTubePublishModal({ isOpen, onClose, job, onPublish, c
                         className="w-full py-3 bg-zinc-100 hover:bg-white text-black rounded-xl font-medium flex items-center justify-center gap-2 transition-all disabled:opacity-50 shadow-sm"
                     >
                         {isGeneratingAI ? (
-                            // eslint-disable-next-line @next/next/no-img-element
                             <span className="flex items-center gap-2">Generating...</span>
                         ) : (
                             <>
@@ -152,7 +217,7 @@ export default function YouTubePublishModal({ isOpen, onClose, job, onPublish, c
                     </p>
                 </div>
 
-                <form onSubmit={handleSubmit} className="p-6 space-y-6">
+                <form onSubmit={handlePublish} className="p-6 space-y-6">
                     {/* Title */}
                     <div className="space-y-2">
                         <label className="text-sm font-medium flex items-center gap-2 text-muted-foreground">
@@ -193,7 +258,7 @@ export default function YouTubePublishModal({ isOpen, onClose, job, onPublish, c
                             value={tags}
                             onChange={(e) => setTags(e.target.value)}
                             className="w-full bg-background border border-border rounded-xl px-4 py-3 focus:outline-none focus:ring-2 focus:ring-primary/20"
-                            placeholder="music, pop, AI, viral..."
+                            placeholder="music, pop, lofi, chill..."
                         />
                     </div>
 
@@ -207,10 +272,10 @@ export default function YouTubePublishModal({ isOpen, onClose, job, onPublish, c
                                 <button
                                     type="button"
                                     onClick={() => { setPrivacyStatus("public"); setIsScheduled(false); }}
-                                    className={`p - 3 rounded - lg border text - sm flex flex - col items - center gap - 2 transition - all ${privacyStatus === "public" && !isScheduled
+                                    className={`p-3 rounded-lg border text-sm flex flex-col items-center gap-2 transition-all ${privacyStatus === "public" && !isScheduled
                                         ? "border-primary bg-primary/10 text-primary"
                                         : "border-border hover:border-primary/50"
-                                        } `}
+                                        }`}
                                 >
                                     <Globe className="w-4 h-4" />
                                     Public
@@ -218,10 +283,10 @@ export default function YouTubePublishModal({ isOpen, onClose, job, onPublish, c
                                 <button
                                     type="button"
                                     onClick={() => { setPrivacyStatus("unlisted"); setIsScheduled(false); }}
-                                    className={`p - 3 rounded - lg border text - sm flex flex - col items - center gap - 2 transition - all ${privacyStatus === "unlisted" && !isScheduled
+                                    className={`p-3 rounded-lg border text-sm flex flex-col items-center gap-2 transition-all ${privacyStatus === "unlisted" && !isScheduled
                                         ? "border-primary bg-primary/10 text-primary"
                                         : "border-border hover:border-primary/50"
-                                        } `}
+                                        }`}
                                 >
                                     <EyeOff className="w-4 h-4" />
                                     Unlisted
@@ -229,10 +294,10 @@ export default function YouTubePublishModal({ isOpen, onClose, job, onPublish, c
                                 <button
                                     type="button"
                                     onClick={() => setPrivacyStatus("private")}
-                                    className={`p - 3 rounded - lg border text - sm flex flex - col items - center gap - 2 transition - all ${((privacyStatus === "private") || isScheduled)
+                                    className={`p-3 rounded-lg border text-sm flex flex-col items-center gap-2 transition-all ${((privacyStatus === "private") || isScheduled)
                                         ? "border-primary bg-primary/10 text-primary"
                                         : "border-border hover:border-primary/50"
-                                        } `}
+                                        }`}
                                 >
                                     <Lock className="w-4 h-4" />
                                     Private
@@ -252,10 +317,10 @@ export default function YouTubePublishModal({ isOpen, onClose, job, onPublish, c
                                     setIsScheduled(nextState);
                                     if (nextState) setPrivacyStatus("private");
                                 }}
-                                className={`w - full p - 3 rounded - lg border text - sm flex items - center justify - center gap - 2 transition - all ${isScheduled
+                                className={`w-full p-3 rounded-lg border text-sm flex items-center justify-center gap-2 transition-all ${isScheduled
                                     ? "border-primary bg-primary/10 text-primary"
                                     : "border-border hover:border-primary/50"
-                                    } `}
+                                    }`}
                             >
                                 <Clock className="w-4 h-4" />
                                 {isScheduled ? "Scheduled" : "Publish Now"}
@@ -305,21 +370,48 @@ export default function YouTubePublishModal({ isOpen, onClose, job, onPublish, c
                         </div>
                     )}
 
-                    <div className="pt-2 sticky bottom-0 bg-card z-10 pb-2">
-                        <button
-                            type="submit"
-                            disabled={isLoading}
-                            className="w-full btn-primary py-4 rounded-xl font-semibold text-lg flex items-center justify-center gap-2 disabled:opacity-50"
-                        >
-                            {isLoading ? (
-                                <>Processing...</>
-                            ) : (
-                                <>
-                                    <Youtube className="w-5 h-5" />
-                                    {isScheduled ? "Scheule Upload" : "Upload to YouTube"}
-                                </>
-                            )}
-                        </button>
+                    {saveSuccess && (
+                        <div className="p-3 bg-green-500/10 border border-green-500/20 text-green-500 rounded-xl text-sm flex items-center gap-2">
+                            <CheckCircle className="w-4 h-4" /> Draft saved!
+                        </div>
+                    )}
+
+                    {/* Action Buttons */}
+                    <div className="pt-2 sticky bottom-0 bg-card z-10 pb-2 space-y-3">
+                        <div className="grid grid-cols-2 gap-3">
+                            {/* Save Draft Button */}
+                            <button
+                                type="button"
+                                onClick={handleSaveDraft}
+                                disabled={isSaving}
+                                className="py-3.5 rounded-xl font-medium text-sm flex items-center justify-center gap-2 border border-border hover:bg-muted/50 transition-colors disabled:opacity-50"
+                            >
+                                {isSaving ? (
+                                    <>Saving...</>
+                                ) : (
+                                    <>
+                                        <Save className="w-4 h-4" />
+                                        Save Draft
+                                    </>
+                                )}
+                            </button>
+
+                            {/* Upload Button */}
+                            <button
+                                type="submit"
+                                disabled={jobIsUploading}
+                                className="py-3.5 rounded-xl font-medium text-sm flex items-center justify-center gap-2 bg-red-600 hover:bg-red-700 text-white transition-colors disabled:opacity-50"
+                            >
+                                {jobIsUploading ? (
+                                    <>Uploading...</>
+                                ) : (
+                                    <>
+                                        <Youtube className="w-4 h-4" />
+                                        {isScheduled ? "Schedule Upload" : "Upload to YouTube"}
+                                    </>
+                                )}
+                            </button>
+                        </div>
                     </div>
                 </form>
             </div>

@@ -7,6 +7,9 @@ import path from "path";
 import os from "os";
 import { Readable } from "stream";
 
+export const maxDuration = 300; // Allow up to 5min for large video uploads (Vercel Pro)
+
+
 // Helper to refresh token
 async function getAuthenticatedClient(clientId: string, clientSecret: string, refreshToken: string) {
     const oauth2Client = new google.auth.OAuth2(
