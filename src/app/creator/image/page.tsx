@@ -165,7 +165,7 @@ export default function CreatorImagePage() {
             const submitData = await submitRes.json();
             if (!submitRes.ok) throw new Error(submitData.error || 'Submit failed');
 
-            const requestId = submitData.requestId;
+            const { requestId, statusUrl, responseUrl } = submitData;
 
             // Step 2: Poll for status (client-side, every 2s, max 60s)
             const startTime = Date.now();
@@ -178,7 +178,7 @@ export default function CreatorImagePage() {
                 const statusRes = await fetch('/api/creator/image/text-to-image', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ action: 'status', requestId }),
+                    body: JSON.stringify({ action: 'status', statusUrl }),
                 });
                 const statusData = await statusRes.json();
 
@@ -199,7 +199,7 @@ export default function CreatorImagePage() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     action: 'save',
-                    requestId,
+                    responseUrl,
                     projectId: currentProject.id,
                     folder: selectedFolder,
                     prompt: prompt.trim(),

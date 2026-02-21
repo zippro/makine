@@ -56,9 +56,9 @@ function getApiKey(): string {
 }
 
 /**
- * Submit a request to fal.ai queue — returns request_id for polling
+ * Submit a request to fal.ai queue — returns request_id + URLs for polling
  */
-export async function submitToFal(model: string, input: Record<string, any>): Promise<{ requestId: string }> {
+export async function submitToFal(model: string, input: Record<string, any>): Promise<{ requestId: string; statusUrl: string; responseUrl: string }> {
     const key = getApiKey();
 
     console.log(`[fal.ai] Submitting to ${model}...`);
@@ -78,46 +78,56 @@ export async function submitToFal(model: string, input: Record<string, any>): Pr
     }
 
     const data = await res.json();
+    console.log(`[fal.ai] Submit response keys:`, Object.keys(data));
 
-    // If synchronous result, wrap it
+    // If synchronous result, no need to poll
     if (data.images) {
-        return { requestId: "__SYNC__" };
+        console.log(`[fal.ai] Got sync result with ${data.images.length} images`);
+        return { requestId: "__SYNC__", statusUrl: "", responseUrl: "" };
     }
 
-    console.log(`[fal.ai] Queued: ${data.request_id}`);
-    return { requestId: data.request_id };
+    const requestId = data.request_id;
+    const statusUrl = data.status_url || `${FAL_API_BASE}/${model}/requests/${requestId}/status`;
+    const responseUrl = data.response_url || `${FAL_API_BASE}/${model}/requests/${requestId}`;
+
+    console.log(`[fal.ai] Queued: ${requestId}`);
+    console.log(`[fal.ai] status_url: ${statusUrl}`);
+    console.log(`[fal.ai] response_url: ${responseUrl}`);
+
+    return { requestId, statusUrl, responseUrl };
 }
 
 /**
- * Check the status of a fal.ai request
+ * Check the status of a fal.ai request using direct URL
  */
-export async function getFalRequestStatus(model: string, requestId: string): Promise<{ status: string; error?: string }> {
+export async function getFalRequestStatus(statusUrl: string): Promise<{ status: string; error?: string }> {
     const key = getApiKey();
-    const url = `${FAL_API_BASE}/${model}/requests/${requestId}/status`;
 
-    const res = await fetch(url, {
+    const res = await fetch(statusUrl, {
         headers: { "Authorization": `Key ${key}` },
     });
 
     if (!res.ok) {
         const text = await res.text();
+        console.error(`[fal.ai] Status check failed (${res.status}):`, text);
         if (res.status === 400 && text.includes("still in progress")) {
             return { status: "IN_PROGRESS" };
         }
-        return { status: "FAILED", error: text };
+        return { status: "FAILED", error: `${res.status}: ${text}` };
     }
 
-    return await res.json();
+    const data = await res.json();
+    console.log(`[fal.ai] Status:`, data.status);
+    return data;
 }
 
 /**
- * Get the completed result of a fal.ai request
+ * Get the completed result of a fal.ai request using direct URL
  */
-export async function getFalRequestResult(model: string, requestId: string): Promise<FalResult> {
+export async function getFalRequestResult(responseUrl: string): Promise<FalResult> {
     const key = getApiKey();
-    const url = `${FAL_API_BASE}/${model}/requests/${requestId}`;
 
-    const res = await fetch(url, {
+    const res = await fetch(responseUrl, {
         headers: { "Authorization": `Key ${key}` },
     });
 

@@ -9,23 +9,23 @@ export async function POST(request: NextRequest) {
     try {
         const supabase = createAdminClient();
         const body = await request.json();
-        const { projectId, folder, prompt, numImages, imageSize, seed, action, requestId } = body;
+        const { projectId, folder, prompt, numImages, imageSize, seed, action, statusUrl, responseUrl } = body;
 
         // ── Step 2: Poll status ──────────────────────────────────────────
         if (action === "status") {
-            if (!requestId) {
-                return NextResponse.json({ error: "requestId required" }, { status: 400 });
+            if (!statusUrl) {
+                return NextResponse.json({ error: "statusUrl required" }, { status: 400 });
             }
-            const status = await getFalRequestStatus("fal-ai/flux-2/turbo", requestId);
+            const status = await getFalRequestStatus(statusUrl);
             return NextResponse.json(status);
         }
 
         // ── Step 3: Fetch result and save ────────────────────────────────
         if (action === "save") {
-            if (!requestId || !projectId) {
-                return NextResponse.json({ error: "requestId and projectId required" }, { status: 400 });
+            if (!responseUrl || !projectId) {
+                return NextResponse.json({ error: "responseUrl and projectId required" }, { status: 400 });
             }
-            const result = await getFalRequestResult("fal-ai/flux-2/turbo", requestId) as FalResult;
+            const result = await getFalRequestResult(responseUrl) as FalResult;
             const targetFolder = folder || "/";
             const assets = await saveImages(supabase, result, projectId, targetFolder, prompt || "");
             return NextResponse.json({ assets, seed: result.seed });
@@ -47,7 +47,7 @@ export async function POST(request: NextRequest) {
 
         console.log(`[T2I] Submitting ${n} image(s): "${prompt.substring(0, 60)}..." size=${size}`);
 
-        const { requestId: falRequestId } = await submitToFal("fal-ai/flux-2/turbo", {
+        const submitResult = await submitToFal("fal-ai/flux-2/turbo", {
             prompt: prompt.trim(),
             image_size: size,
             num_images: n,
@@ -57,8 +57,13 @@ export async function POST(request: NextRequest) {
             output_format: "png",
         });
 
-        console.log(`[T2I] Submitted, requestId: ${falRequestId}`);
-        return NextResponse.json({ requestId: falRequestId, status: "SUBMITTED" });
+        console.log(`[T2I] Submitted, requestId: ${submitResult.requestId}`);
+        return NextResponse.json({
+            requestId: submitResult.requestId,
+            statusUrl: submitResult.statusUrl,
+            responseUrl: submitResult.responseUrl,
+            status: "SUBMITTED",
+        });
 
     } catch (error: any) {
         console.error("[T2I] Error:", error.message);
