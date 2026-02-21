@@ -1,21 +1,19 @@
 "use client";
 
 import React, { createContext, useContext, useState, useCallback } from "react";
-import { X, ExternalLink, RefreshCw, CheckCircle, AlertCircle, Youtube, Minimize2, Download, Upload } from "lucide-react";
+import { X, ExternalLink, RefreshCw, CheckCircle, AlertCircle, Youtube, Minimize2, Upload } from "lucide-react";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
-
-type UploadStep = "init" | "downloading" | "uploading" | "done" | "error";
 
 export interface UploadTask {
     id: string;
     jobId: string;
     title: string;
     status: "uploading" | "success" | "error";
-    step: UploadStep;
     progress?: string;
     youtubeUrl?: string;
     error?: string;
+    startedAt: number;
     metadata: {
         title: string;
         description: string;
@@ -52,124 +50,85 @@ export function UploadQueueProvider({ children }: { children: React.ReactNode })
     }, []);
 
     const executeUpload = useCallback(async (task: UploadTask) => {
-        try {
-            // ── Step 1: Try client-side upload (faster, no server limits) ──
-            updateTask(task.id, { step: "init", progress: "Creating upload session..." });
-            console.log("[Upload] Step 1: Creating upload session...");
+        const startTime = Date.now();
 
-            const initRes = await fetch(`/api/jobs/${task.jobId}/publish-init`, {
+        // Show elapsed time in the toast
+        const progressInterval = setInterval(() => {
+            const elapsed = Math.round((Date.now() - startTime) / 1000);
+            const min = Math.floor(elapsed / 60);
+            const sec = elapsed % 60;
+            updateTask(task.id, {
+                progress: `Uploading to YouTube... ${min > 0 ? min + 'm ' : ''}${sec}s`
+            });
+        }, 2000);
+
+        try {
+            updateTask(task.id, { progress: "Starting server-side upload..." });
+            console.log("[Upload] Starting server-side upload for job:", task.jobId);
+
+            // Use AbortController to handle timeouts
+            const controller = new AbortController();
+
+            const res = await fetch(`/api/jobs/${task.jobId}/publish`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(task.metadata),
+                signal: controller.signal,
             });
 
-            let initData: any;
+            clearInterval(progressInterval);
+
+            // Parse response carefully
+            let data: any;
             try {
-                const text = await initRes.text();
-                console.log("[Upload] Init response:", initRes.status, text.substring(0, 200));
-                initData = text ? JSON.parse(text) : {};
-            } catch {
-                throw new Error("Server error — could not create upload session.");
-            }
+                const text = await res.text();
+                console.log("[Upload] Server response:", res.status, text.substring(0, 300));
 
-            if (!initRes.ok) {
-                throw new Error(initData.error || "Failed to create upload session");
-            }
-
-            const { uploadUrl, videoUrl } = initData;
-            if (!uploadUrl || !videoUrl) {
-                throw new Error("Missing upload URL or video URL from server");
-            }
-
-            console.log("[Upload] Session created. Video URL:", videoUrl.substring(0, 80));
-
-            // ── Step 2: Download video ──
-            updateTask(task.id, { step: "downloading", progress: "Downloading video..." });
-            console.log("[Upload] Step 2: Downloading video...");
-
-            let videoBlob: Blob;
-            try {
-                // Try direct download first (works if same-origin or CORS-enabled)
-                const videoRes = await fetch(videoUrl);
-                if (!videoRes.ok) {
-                    throw new Error(`HTTP ${videoRes.status}`);
+                if (!text || text.trim().length === 0) {
+                    throw new Error("Server returned empty response — the upload likely timed out. Check YouTube Studio to see if the video appeared.");
                 }
-                videoBlob = await videoRes.blob();
-            } catch (dlErr: any) {
-                // If direct download fails (CORS), try through our proxy API
-                console.warn("[Upload] Direct download failed:", dlErr.message, "— trying proxy...");
-                updateTask(task.id, { progress: "Downloading via proxy..." });
-
-                const proxyRes = await fetch(`/api/proxy-video?url=${encodeURIComponent(videoUrl)}`);
-                if (!proxyRes.ok) {
-                    const errText = await proxyRes.text();
-                    throw new Error(`Video download failed: ${errText || proxyRes.status}`);
+                if (text.trim().startsWith("<!") || text.trim().startsWith("<html")) {
+                    throw new Error(
+                        res.status === 504 ? "Server timed out — the video may still be uploading. Check YouTube Studio in a few minutes."
+                            : `Server error (${res.status}). Try again.`
+                    );
                 }
-                videoBlob = await proxyRes.blob();
+                data = JSON.parse(text);
+            } catch (parseErr: any) {
+                if (!parseErr.message.includes("JSON")) throw parseErr;
+                throw new Error("Server response was cut off — the upload may have timed out. Check YouTube Studio.");
             }
 
-            const sizeMB = (videoBlob.size / 1024 / 1024).toFixed(0);
-            console.log(`[Upload] Downloaded: ${sizeMB} MB`);
+            if (!res.ok) {
+                throw new Error(data.error || "Upload failed");
+            }
 
-            // ── Step 3: Upload to YouTube ──
-            updateTask(task.id, { step: "uploading", progress: `Uploading ${sizeMB} MB to YouTube...` });
-            console.log(`[Upload] Step 3: Uploading ${sizeMB} MB to YouTube...`);
-
-            const uploadStartTime = Date.now();
-
-            const ytResult = await new Promise<{ id: string }>((resolve, reject) => {
-                const xhr = new XMLHttpRequest();
-                xhr.open("PUT", uploadUrl, true);
-                xhr.setRequestHeader("Content-Type", "video/mp4");
-
-                xhr.upload.onprogress = (e) => {
-                    if (e.lengthComputable) {
-                        const pct = Math.round((e.loaded / e.total) * 100);
-                        const uploadedMB = (e.loaded / 1024 / 1024).toFixed(0);
-                        const elapsed = Math.round((Date.now() - uploadStartTime) / 1000);
-                        const speed = e.loaded > 0 ? (e.loaded / elapsed / 1024 / 1024).toFixed(1) : "0";
-                        updateTask(task.id, {
-                            progress: `Uploading: ${pct}% (${uploadedMB}/${sizeMB} MB) — ${speed} MB/s`
-                        });
-                    }
-                };
-
-                xhr.onload = () => {
-                    if (xhr.status >= 200 && xhr.status < 300) {
-                        try {
-                            resolve(JSON.parse(xhr.responseText));
-                        } catch {
-                            console.log("[Upload] YouTube response (non-JSON):", xhr.responseText.substring(0, 200));
-                            reject(new Error("YouTube returned invalid response. Check YouTube Studio — the video may have uploaded."));
-                        }
-                    } else {
-                        console.error("[Upload] YouTube error:", xhr.status, xhr.responseText.substring(0, 300));
-                        reject(new Error(`YouTube rejected upload (${xhr.status}). Try again.`));
-                    }
-                };
-
-                xhr.onerror = () => reject(new Error("Network error uploading to YouTube."));
-                xhr.ontimeout = () => reject(new Error("YouTube upload timed out."));
-                xhr.send(videoBlob);
-            });
-
-            const elapsed = Math.round((Date.now() - uploadStartTime) / 1000);
-            const youtubeUrl = `https://youtu.be/${ytResult.id}`;
-            console.log(`[Upload] ✅ Done in ${elapsed}s! URL: ${youtubeUrl}`);
+            const elapsed = Math.round((Date.now() - startTime) / 1000);
+            const min = Math.floor(elapsed / 60);
+            const sec = elapsed % 60;
+            console.log(`[Upload] ✅ Success! URL: ${data.url}`);
 
             updateTask(task.id, {
                 status: "success",
-                step: "done",
-                youtubeUrl,
-                progress: `Published in ${Math.round(elapsed / 60)}m ${elapsed % 60}s`
+                youtubeUrl: data.url,
+                progress: `Published in ${min > 0 ? min + 'm ' : ''}${sec}s`
             });
 
         } catch (err: any) {
-            console.error("[Upload] ❌ FAILED:", err.message);
+            clearInterval(progressInterval);
+            console.error("[Upload] ❌ Error:", err.message);
+
+            // Check if it's a timeout-like error
+            const isTimeout = err.name === "AbortError" ||
+                err.message?.includes("timed out") ||
+                err.message?.includes("timeout") ||
+                err.message?.includes("empty response");
+
             updateTask(task.id, {
                 status: "error",
-                step: "error",
-                error: err.message || "Upload failed"
+                error: isTimeout
+                    ? "Upload timed out — but the video may still be processing on YouTube. Check YouTube Studio."
+                    : err.message || "Upload failed"
             });
         }
     }, [updateTask]);
@@ -180,7 +139,7 @@ export function UploadQueueProvider({ children }: { children: React.ReactNode })
             jobId,
             title,
             status: "uploading",
-            step: "init",
+            startedAt: Date.now(),
             progress: "Starting...",
             metadata,
         };
@@ -195,10 +154,10 @@ export function UploadQueueProvider({ children }: { children: React.ReactNode })
             if (!task) return prev;
             const updated = prev.map(u =>
                 u.id === taskId
-                    ? { ...u, status: "uploading" as const, step: "init" as const, error: undefined, progress: "Retrying..." }
+                    ? { ...u, status: "uploading" as const, error: undefined, progress: "Retrying...", startedAt: Date.now() }
                     : u
             );
-            executeUpload({ ...task, status: "uploading", step: "init", error: undefined, progress: "Retrying..." });
+            executeUpload({ ...task, status: "uploading", error: undefined, progress: "Retrying...", startedAt: Date.now() });
             return updated;
         });
     }, [executeUpload]);
@@ -245,21 +204,15 @@ export function UploadQueueProvider({ children }: { children: React.ReactNode })
 function UploadToast({ task, onRetry, onDismiss }: { task: UploadTask; onRetry: () => void; onDismiss: () => void }) {
     const borderColor = task.status === "uploading" ? "border-blue-500/30" : task.status === "success" ? "border-green-500/30" : "border-red-500/30";
 
-    const StepIcon = () => {
-        if (task.status === "success") return <CheckCircle className="w-4 h-4 text-green-500" />;
-        if (task.status === "error") return <AlertCircle className="w-4 h-4 text-red-500" />;
-        if (task.step === "downloading") return <Download className="w-4 h-4 text-blue-500 animate-bounce" />;
-        if (task.step === "uploading") return <Upload className="w-4 h-4 text-blue-500 animate-pulse" />;
-        return <RefreshCw className="w-4 h-4 text-blue-500 animate-spin" />;
-    };
-
     return (
         <div className={`bg-card border ${borderColor} rounded-xl p-4 shadow-xl animate-in slide-in-from-right-5 fade-in duration-300`}>
             <div className="flex items-start gap-3">
                 <div className="flex-shrink-0 mt-0.5">
                     <div className={`w-8 h-8 rounded-full flex items-center justify-center ${task.status === "success" ? "bg-green-500/10" : task.status === "error" ? "bg-red-500/10" : "bg-blue-500/10"
                         }`}>
-                        <StepIcon />
+                        {task.status === "success" && <CheckCircle className="w-4 h-4 text-green-500" />}
+                        {task.status === "error" && <AlertCircle className="w-4 h-4 text-red-500" />}
+                        {task.status === "uploading" && <Upload className="w-4 h-4 text-blue-500 animate-pulse" />}
                     </div>
                 </div>
                 <div className="flex-1 min-w-0">
@@ -279,7 +232,7 @@ function UploadToast({ task, onRetry, onDismiss }: { task: UploadTask; onRetry: 
                     )}
                     {task.status === "error" && (
                         <div className="mt-1">
-                            <p className="text-xs text-red-400 line-clamp-2">{task.error}</p>
+                            <p className="text-xs text-red-400 line-clamp-3">{task.error}</p>
                             <button onClick={onRetry} className="text-xs text-primary hover:underline mt-1">Retry</button>
                         </div>
                     )}

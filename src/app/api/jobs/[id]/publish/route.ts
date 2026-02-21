@@ -1,4 +1,3 @@
-
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { google } from "googleapis";
@@ -24,101 +23,78 @@ export async function POST(
     const supabase = await createClient();
 
     let body;
-    try {
-        body = await request.json();
-    } catch {
-        body = {};
-    }
+    try { body = await request.json(); } catch { body = {}; }
 
-    const {
-        title: inputTitle,
-        description: inputDesc,
-        tags: inputTags,
-        privacyStatus: inputPrivacy,
-        publishAt
-    } = body;
+    const { title: inputTitle, description: inputDesc, tags: inputTags, privacyStatus: inputPrivacy, publishAt } = body;
 
-    // 1. Get Job Details
+    // 1. Get Job
     const { data: job, error: jobError } = await supabase
         .from("video_jobs")
-        .select(`
-            *,
-            project:projects (
-                id,
-                youtube_creds
-            )
-        `)
+        .select(`*, project:projects ( id, youtube_creds )`)
         .eq("id", id)
         .single();
 
-    if (jobError || !job) {
-        return NextResponse.json({ error: "Job not found" }, { status: 404 });
-    }
+    if (jobError || !job) return NextResponse.json({ error: "Job not found" }, { status: 404 });
+    if (!job.video_url) return NextResponse.json({ error: "Video not ready" }, { status: 400 });
 
-    if (!job.video_url) {
-        return NextResponse.json({ error: "Video not ready (no video_url)" }, { status: 400 });
-    }
-
-    // 2. Validate Credentials
     const project = job.project;
-    if (!project || !project.youtube_creds || !project.youtube_creds.refresh_token) {
-        return NextResponse.json({ error: "YouTube credentials missing in Project Settings" }, { status: 400 });
+    if (!project?.youtube_creds?.refresh_token) {
+        return NextResponse.json({ error: "YouTube credentials missing" }, { status: 400 });
     }
 
     const { client_id, client_secret, refresh_token } = project.youtube_creds;
 
     try {
-        // 3. Authenticate
+        // 2. Auth
         const auth = await getAuthenticatedClient(client_id, client_secret, refresh_token);
         const youtube = google.youtube({ version: "v3", auth });
 
-        // 4. Fetch video and pipe directly to YouTube (single pass, low memory)
-        console.log("Fetching video from:", job.video_url.substring(0, 80) + "...");
-        const videoResponse = await fetch(job.video_url);
-        if (!videoResponse.ok || !videoResponse.body) {
-            throw new Error(`Failed to download video: ${videoResponse.status} ${videoResponse.statusText}`);
-        }
+        // 3. Get video size
+        console.log(`[Publish] Fetching video HEAD: ${job.video_url.substring(0, 60)}...`);
+        const headRes = await fetch(job.video_url, { method: "HEAD" });
+        const contentLength = headRes.headers.get("content-length");
+        const fileSize = contentLength ? parseInt(contentLength) : 0;
+        console.log(`[Publish] Video size: ${(fileSize / 1024 / 1024).toFixed(1)} MB`);
 
-        // Use PassThrough to pipe web stream directly to YouTube API
+        // 4. Start download and stream directly to YouTube
+        console.log("[Publish] Starting download + stream to YouTube...");
+        const videoRes = await fetch(job.video_url);
+        if (!videoRes.ok || !videoRes.body) throw new Error("Failed to download video");
+
         const passThrough = new PassThrough();
-        // @ts-expect-error - Web ReadableStream to Node Readable type mismatch
-        const nodeStream = Readable.fromWeb(videoResponse.body);
+        // @ts-expect-error - Web ReadableStream to Node Readable
+        const nodeStream = Readable.fromWeb(videoRes.body);
+
+        // Track progress
+        let bytesProcessed = 0;
+        const startTime = Date.now();
+        nodeStream.on("data", (chunk: Buffer) => {
+            bytesProcessed += chunk.length;
+            const pct = fileSize > 0 ? Math.round((bytesProcessed / fileSize) * 100) : 0;
+            const elapsed = (Date.now() - startTime) / 1000;
+            if (pct % 10 === 0 || elapsed > 250) { // Log every 10% or near timeout
+                console.log(`[Publish] Progress: ${pct}% (${(bytesProcessed / 1024 / 1024).toFixed(0)}/${(fileSize / 1024 / 1024).toFixed(0)} MB) — ${elapsed.toFixed(0)}s`);
+            }
+        });
         nodeStream.pipe(passThrough);
 
-        const contentLength = videoResponse.headers.get("content-length");
-        console.log(`Video size: ${contentLength ? (parseInt(contentLength) / 1024 / 1024).toFixed(1) + " MB" : "unknown"}`);
-
         // 5. Upload to YouTube
-        const title = inputTitle || job.title_text || `My Video ${new Date().toLocaleDateString()}`;
-        const description = inputDesc || `Created with Makine Video AI\n\n#shorts`;
-        const tags = Array.isArray(inputTags) ? inputTags : ["music", "video", "creator"];
+        const title = inputTitle || job.title_text || `My Video`;
+        const description = inputDesc || `Created with Makine Video AI`;
+        const tags = Array.isArray(inputTags) ? inputTags : ["music", "video"];
         const privacyStatus = inputPrivacy || "private";
-
-        console.log("Starting YouTube upload...");
-        const startTime = Date.now();
 
         const res = await youtube.videos.insert({
             part: ["snippet", "status"],
             requestBody: {
-                snippet: {
-                    title: title.substring(0, 100),
-                    description,
-                    tags,
-                    categoryId: "22",
-                },
-                status: {
-                    privacyStatus,
-                    selfDeclaredMadeForKids: false,
-                    publishAt: publishAt || undefined,
-                },
+                snippet: { title: title.substring(0, 100), description, tags, categoryId: "22" },
+                status: { privacyStatus, selfDeclaredMadeForKids: false, publishAt: publishAt || undefined },
             },
-            media: {
-                body: passThrough,
-            },
+            media: { body: passThrough },
         });
 
-        const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-        console.log(`Upload complete in ${elapsed}s. YouTube ID: ${res.data.id}`);
+        const elapsed = ((Date.now() - startTime) / 1000).toFixed(0);
+        console.log(`[Publish] ✅ Complete in ${elapsed}s! YouTube ID: ${res.data.id}`);
 
         return NextResponse.json({
             success: true,
@@ -127,7 +103,7 @@ export async function POST(
         });
 
     } catch (error: any) {
-        console.error("YouTube Upload Error:", error?.message || error);
+        console.error("[Publish] ❌ Error:", error?.message || error);
         return NextResponse.json({ error: error?.message || "Upload failed" }, { status: 500 });
     }
 }
