@@ -6,9 +6,9 @@ import fs from "fs";
 import path from "path";
 import os from "os";
 import { Readable } from "stream";
+import { pipeline } from "stream/promises";
 
 export const maxDuration = 300; // Allow up to 5min for large video uploads (Vercel Pro)
-
 
 // Helper to refresh token
 async function getAuthenticatedClient(clientId: string, clientSecret: string, refreshToken: string) {
@@ -76,49 +76,56 @@ export async function POST(
 
     const { client_id, client_secret, refresh_token } = project.youtube_creds;
 
+    // Temp file path for video (avoids OOM by streaming to disk instead of memory)
+    const tmpFile = path.join(os.tmpdir(), `yt-upload-${id}-${Date.now()}.mp4`);
+
     try {
         // 3. Authenticate
         const auth = await getAuthenticatedClient(client_id, client_secret, refresh_token);
         const youtube = google.youtube({ version: "v3", auth });
 
-        // 4. Download Video to Temp File (YouTube API needs a stream or file)
-        // Since video_url is a Supabase Storage URL, we fetch it
+        // 4. Download video to temp file (streams to disk, not memory)
+        console.log("Downloading video to temp file:", tmpFile);
         const videoResponse = await fetch(job.video_url);
-        if (!videoResponse.ok) throw new Error("Failed to download video file");
+        if (!videoResponse.ok || !videoResponse.body) {
+            throw new Error("Failed to download video file");
+        }
 
-        // Convert web stream to Node readable stream
-        // @ts-expect-error - Web streams to Node streams mismatch
-        const videoStream = Readable.fromWeb(videoResponse.body);
+        // Stream video bytes to disk
+        // @ts-expect-error - Web ReadableStream to Node Readable type mismatch
+        const nodeStream = Readable.fromWeb(videoResponse.body);
+        const writeStream = fs.createWriteStream(tmpFile);
+        await pipeline(nodeStream, writeStream);
 
-        // 5. Upload to YouTube
-        // Use input metadata or fallbacks
+        const fileSize = fs.statSync(tmpFile).size;
+        console.log(`Video downloaded: ${(fileSize / 1024 / 1024).toFixed(1)} MB`);
+
+        // 5. Upload to YouTube from disk (streams from file, low memory usage)
         const title = inputTitle || job.title_text || `My Video ${new Date().toLocaleDateString()}`;
         const description = inputDesc || `Created with Music Video Creator for project: ${project.name || 'Unknown'}\n\n#shorts`;
         const tags = Array.isArray(inputTags) ? inputTags : ["music", "video", "creator"];
-
         const privacyStatus = inputPrivacy || "private";
 
         const res = await youtube.videos.insert({
             part: ["snippet", "status"],
             requestBody: {
                 snippet: {
-                    title: title.substring(0, 100), // Max 100 chars
+                    title: title.substring(0, 100),
                     description: description,
                     tags: tags,
-                    categoryId: "22", // People & Blogs
+                    categoryId: "22", // People & Blogs (works for music too)
                 },
                 status: {
                     privacyStatus: privacyStatus,
                     selfDeclaredMadeForKids: false,
-                    publishAt: publishAt || undefined, // Only for scheduled uploads
+                    publishAt: publishAt || undefined,
                 },
             },
             media: {
-                body: videoStream,
+                body: fs.createReadStream(tmpFile), // Stream from disk, not memory
             },
         });
 
-        // 6. Update Job with YouTube ID
         console.log("Upload success:", res.data);
 
         return NextResponse.json({
@@ -131,5 +138,16 @@ export async function POST(
         console.error("YouTube Upload Error:", error);
         // @ts-expect-error - Error typing
         return NextResponse.json({ error: error.message || "Upload failed" }, { status: 500 });
+    } finally {
+        // Clean up temp file
+        try {
+            if (fs.existsSync(tmpFile)) {
+                fs.unlinkSync(tmpFile);
+                console.log("Cleaned up temp file:", tmpFile);
+            }
+        } catch (cleanupErr) {
+            console.error("Failed to clean up temp file:", cleanupErr);
+        }
     }
 }
+
