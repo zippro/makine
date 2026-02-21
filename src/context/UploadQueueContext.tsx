@@ -57,9 +57,9 @@ export function UploadQueueProvider({ children }: { children: React.ReactNode })
         const startTime = Date.now();
 
         try {
-            // ── Step 1: Create YouTube upload session ──
-            updateTask(task.id, { progress: "Creating upload session...", percent: 0 });
-            console.log("[Upload] Creating session for job:", task.jobId);
+            // ── Step 1: Get access token + video info from server ──
+            updateTask(task.id, { progress: "Getting credentials...", percent: 0 });
+            console.log("[Upload] Step 1: Getting access token for job:", task.jobId);
 
             const initRes = await fetch(`/api/jobs/${task.jobId}/publish-init`, {
                 method: "POST",
@@ -75,30 +75,92 @@ export function UploadQueueProvider({ children }: { children: React.ReactNode })
                 throw new Error(err.error || `Server error (${initRes.status})`);
             }
 
-            const { uploadUrl, videoUrl, fileSize } = JSON.parse(initText);
-            if (!uploadUrl) throw new Error("No upload URL returned");
+            const { accessToken, videoUrl, fileSize } = JSON.parse(initText);
+            if (!accessToken) throw new Error("No access token returned");
             if (!videoUrl) throw new Error("No video URL returned");
 
             const totalMB = (fileSize / 1024 / 1024).toFixed(0);
-            const totalChunks = Math.ceil(fileSize / CHUNK_SIZE);
-            console.log(`[Upload] Session created. Video: ${totalMB} MB, ${totalChunks} chunks of ${CHUNK_SIZE / 1024 / 1024} MB`);
+            console.log(`[Upload] Got token. Video: ${totalMB} MB at ${videoUrl.substring(0, 60)}`);
 
-            // ── Step 2: Upload in chunks ──
-            let bytesUploaded = 0;
+            // ── Step 2: Create YouTube upload session FROM THE BROWSER ──
+            // This ensures Google includes CORS headers on the upload URI
+            updateTask(task.id, { progress: "Creating YouTube session...", percent: 0 });
+            console.log("[Upload] Step 2: Creating YouTube upload session from browser...");
+
+            const title = task.metadata.title || "My Video";
+            const description = task.metadata.description || "";
+            const tags = task.metadata.tags || [];
+            const privacyStatus = task.metadata.privacyStatus || "private";
+
+            const ytMetadata: any = {
+                snippet: {
+                    title: title.substring(0, 100),
+                    description,
+                    tags,
+                    categoryId: "22",
+                },
+                status: {
+                    privacyStatus,
+                    selfDeclaredMadeForKids: false,
+                },
+            };
+            if (task.metadata.publishAt) {
+                ytMetadata.status.publishAt = task.metadata.publishAt;
+            }
+
+            const initHeaders: Record<string, string> = {
+                "Authorization": `Bearer ${accessToken}`,
+                "Content-Type": "application/json; charset=UTF-8",
+                "X-Upload-Content-Type": "video/mp4",
+            };
+            if (fileSize > 0) {
+                initHeaders["X-Upload-Content-Length"] = fileSize.toString();
+            }
+
+            const sessionRes = await fetch(
+                "https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status",
+                {
+                    method: "POST",
+                    headers: initHeaders,
+                    body: JSON.stringify(ytMetadata),
+                }
+            );
+
+            if (!sessionRes.ok) {
+                const errText = await sessionRes.text();
+                console.error("[Upload] YouTube session creation failed:", sessionRes.status, errText);
+                try {
+                    const errData = JSON.parse(errText);
+                    const msg = errData?.error?.message || errData?.error?.errors?.[0]?.message || errText;
+                    throw new Error(`YouTube error: ${msg}`);
+                } catch (e: any) {
+                    if (e.message.startsWith("YouTube error:")) throw e;
+                    throw new Error(`YouTube rejected session (${sessionRes.status})`);
+                }
+            }
+
+            const uploadUrl = sessionRes.headers.get("location");
+            if (!uploadUrl) throw new Error("YouTube did not return an upload URL");
+
+            console.log("[Upload] YouTube session created! Upload URL obtained.");
+
+            // ── Step 3: Upload in chunks ──
+            const totalChunks = Math.ceil(fileSize / CHUNK_SIZE);
+            console.log(`[Upload] Starting chunked upload: ${totalChunks} chunks of ${CHUNK_SIZE / 1024 / 1024} MB`);
 
             for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
                 const start = chunkIndex * CHUNK_SIZE;
                 const end = Math.min(start + CHUNK_SIZE, fileSize) - 1;
                 const chunkSize = end - start + 1;
-                const pct = Math.round((start / fileSize) * 100);
+                const overallPct = Math.round((start / fileSize) * 100);
 
+                // Download chunk from nginx
                 updateTask(task.id, {
-                    progress: `Downloading chunk ${chunkIndex + 1}/${totalChunks} (${pct}%)`,
-                    percent: pct,
+                    progress: `Chunk ${chunkIndex + 1}/${totalChunks}: downloading... (${overallPct}%)`,
+                    percent: overallPct,
                 });
-                console.log(`[Upload] Chunk ${chunkIndex + 1}/${totalChunks}: bytes ${start}-${end} (${(chunkSize / 1024 / 1024).toFixed(1)} MB)`);
+                console.log(`[Upload] Chunk ${chunkIndex + 1}/${totalChunks}: downloading bytes ${start}-${end}`);
 
-                // Download this chunk from nginx using Range header
                 const chunkRes = await fetch(videoUrl, {
                     headers: { "Range": `bytes=${start}-${end}` },
                 });
@@ -108,80 +170,69 @@ export function UploadQueueProvider({ children }: { children: React.ReactNode })
                 }
 
                 const chunkBlob = await chunkRes.blob();
-                console.log(`[Upload] Downloaded chunk: ${(chunkBlob.size / 1024 / 1024).toFixed(1)} MB`);
+                console.log(`[Upload] Chunk downloaded: ${(chunkBlob.size / 1024 / 1024).toFixed(1)} MB`);
 
-                // Upload this chunk to YouTube
+                // Upload chunk to YouTube
                 updateTask(task.id, {
-                    progress: `Uploading chunk ${chunkIndex + 1}/${totalChunks} to YouTube (${pct}%)`,
-                    percent: pct,
+                    progress: `Chunk ${chunkIndex + 1}/${totalChunks}: uploading to YouTube... (${overallPct}%)`,
+                    percent: overallPct,
                 });
 
-                const isLastChunk = (chunkIndex === totalChunks - 1);
                 const contentRange = `bytes ${start}-${end}/${fileSize}`;
+                console.log(`[Upload] Uploading chunk to YouTube: ${contentRange}`);
 
                 const uploadRes = await fetch(uploadUrl, {
                     method: "PUT",
                     headers: {
-                        "Content-Length": chunkSize.toString(),
+                        "Authorization": `Bearer ${accessToken}`,
                         "Content-Range": contentRange,
                         "Content-Type": "video/mp4",
                     },
                     body: chunkBlob,
                 });
 
-                bytesUploaded = end + 1;
+                console.log(`[Upload] YouTube response: ${uploadRes.status}`);
 
-                if (isLastChunk) {
-                    // Last chunk: YouTube returns 200/201 with video data
-                    if (uploadRes.ok) {
-                        const ytData = await uploadRes.json();
-                        const youtubeUrl = `https://youtu.be/${ytData.id}`;
-                        const elapsed = Math.round((Date.now() - startTime) / 1000);
-                        const min = Math.floor(elapsed / 60);
-                        const sec = elapsed % 60;
+                if (uploadRes.status === 200 || uploadRes.status === 201) {
+                    // Upload complete!
+                    const ytData = await uploadRes.json();
+                    const youtubeUrl = `https://youtu.be/${ytData.id}`;
+                    const elapsed = Math.round((Date.now() - startTime) / 1000);
+                    const min = Math.floor(elapsed / 60);
+                    const sec = elapsed % 60;
 
-                        console.log(`[Upload] ✅ Complete! URL: ${youtubeUrl} (${min}m ${sec}s)`);
-                        updateTask(task.id, {
-                            status: "success",
-                            youtubeUrl,
-                            progress: `Published in ${min}m ${sec}s`,
-                            percent: 100,
-                        });
-                        return;
-                    } else {
-                        const errText = await uploadRes.text();
-                        console.error("[Upload] Final chunk error:", uploadRes.status, errText);
-                        throw new Error(`YouTube rejected the final chunk (${uploadRes.status})`);
-                    }
+                    console.log(`[Upload] ✅ Complete! URL: ${youtubeUrl} (${min}m ${sec}s)`);
+                    updateTask(task.id, {
+                        status: "success",
+                        youtubeUrl,
+                        progress: `Published in ${min}m ${sec}s`,
+                        percent: 100,
+                    });
+                    return;
+                } else if (uploadRes.status === 308) {
+                    // Chunk accepted, more to go
+                    const range = uploadRes.headers.get("range");
+                    console.log(`[Upload] Chunk ${chunkIndex + 1} accepted. Server range: ${range}`);
                 } else {
-                    // Non-last chunk: YouTube returns 308 Resume Incomplete
-                    if (uploadRes.status === 308) {
-                        const range = uploadRes.headers.get("range");
-                        console.log(`[Upload] Chunk ${chunkIndex + 1} accepted. Range: ${range}`);
-                    } else if (uploadRes.ok) {
-                        // YouTube accepted early (smaller than expected)
-                        const ytData = await uploadRes.json();
-                        const youtubeUrl = `https://youtu.be/${ytData.id}`;
-                        const elapsed = Math.round((Date.now() - startTime) / 1000);
-                        console.log(`[Upload] ✅ YouTube accepted early! URL: ${youtubeUrl}`);
-                        updateTask(task.id, {
-                            status: "success",
-                            youtubeUrl,
-                            progress: `Published in ${Math.floor(elapsed / 60)}m ${elapsed % 60}s`,
-                            percent: 100,
-                        });
-                        return;
-                    } else {
-                        const errText = await uploadRes.text();
-                        console.error("[Upload] Chunk upload error:", uploadRes.status, errText);
-                        throw new Error(`YouTube rejected chunk ${chunkIndex + 1} (${uploadRes.status})`);
+                    // Error
+                    const errText = await uploadRes.text();
+                    console.error(`[Upload] Chunk ${chunkIndex + 1} error:`, uploadRes.status, errText);
+                    try {
+                        const errData = JSON.parse(errText);
+                        const msg = errData?.error?.message || `YouTube error (${uploadRes.status})`;
+                        throw new Error(msg);
+                    } catch (e: any) {
+                        if (e.message.includes("YouTube")) throw e;
+                        throw new Error(`Upload failed at chunk ${chunkIndex + 1} (${uploadRes.status})`);
                     }
                 }
             }
 
+            // If we exit the loop without success, something went wrong
+            throw new Error("Upload completed all chunks but YouTube didn't confirm. Check YouTube Studio.");
+
         } catch (err: any) {
             console.error("[Upload] ❌ FAILED:", err.message);
-            console.error("[Upload] Full error:", err);
             updateTask(task.id, {
                 status: "error",
                 error: err.message || "Upload failed",
@@ -268,20 +319,14 @@ function UploadToast({ task, onRetry, onDismiss }: { task: UploadTask; onRetry: 
                 </div>
                 <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium truncate">{task.title}</p>
-
                     {task.status === "uploading" && (
                         <div className="mt-1.5">
-                            {/* Progress bar */}
                             <div className="w-full bg-border/50 rounded-full h-1.5 mb-1">
-                                <div
-                                    className="bg-blue-500 h-1.5 rounded-full transition-all duration-500"
-                                    style={{ width: `${task.percent || 0}%` }}
-                                />
+                                <div className="bg-blue-500 h-1.5 rounded-full transition-all duration-500" style={{ width: `${task.percent || 0}%` }} />
                             </div>
                             <p className="text-xs text-blue-400">{task.progress}</p>
                         </div>
                     )}
-
                     {task.status === "success" && (
                         <div className="flex items-center gap-2 mt-1">
                             <span className="text-xs text-green-400">{task.progress || "Published!"}</span>
@@ -292,7 +337,6 @@ function UploadToast({ task, onRetry, onDismiss }: { task: UploadTask; onRetry: 
                             )}
                         </div>
                     )}
-
                     {task.status === "error" && (
                         <div className="mt-1">
                             <p className="text-xs text-red-400 line-clamp-3">{task.error}</p>

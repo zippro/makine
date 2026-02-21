@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { google } from "googleapis";
 
-export const maxDuration = 30; // Only needs to create the upload session, not transfer data
+export const maxDuration = 30;
 
 async function getAuthenticatedClient(clientId: string, clientSecret: string, refreshToken: string) {
     const oauth2Client = new google.auth.OAuth2(
@@ -15,9 +15,8 @@ async function getAuthenticatedClient(clientId: string, clientSecret: string, re
 }
 
 /**
- * Creates a YouTube resumable upload session and returns the upload URL.
- * The client (browser) then uploads the video directly to YouTube using this URL.
- * This bypasses Vercel's timeout/memory limits since data never flows through the server.
+ * Returns YouTube access token + video info so the browser can
+ * create the upload session directly (enabling CORS on the upload URI).
  */
 export async function POST(
     request: NextRequest,
@@ -26,126 +25,44 @@ export async function POST(
     const id = (await params).id;
     const supabase = await createClient();
 
-    let body;
-    try {
-        body = await request.json();
-    } catch {
-        body = {};
-    }
-
-    const {
-        title: inputTitle,
-        description: inputDesc,
-        tags: inputTags,
-        privacyStatus: inputPrivacy,
-        publishAt
-    } = body;
-
-    // 1. Get Job Details
+    // 1. Get Job
     const { data: job, error: jobError } = await supabase
         .from("video_jobs")
-        .select(`
-            *,
-            project:projects (
-                id,
-                youtube_creds
-            )
-        `)
+        .select(`*, project:projects ( id, youtube_creds )`)
         .eq("id", id)
         .single();
 
-    if (jobError || !job) {
-        return NextResponse.json({ error: "Job not found" }, { status: 404 });
-    }
+    if (jobError || !job) return NextResponse.json({ error: "Job not found" }, { status: 404 });
+    if (!job.video_url) return NextResponse.json({ error: "Video not ready" }, { status: 400 });
 
-    if (!job.video_url) {
-        return NextResponse.json({ error: "Video not ready (no video_url)" }, { status: 400 });
-    }
-
-    // 2. Validate Credentials
     const project = job.project;
-    if (!project || !project.youtube_creds || !project.youtube_creds.refresh_token) {
+    if (!project?.youtube_creds?.refresh_token) {
         return NextResponse.json({ error: "YouTube credentials missing in Project Settings" }, { status: 400 });
     }
 
     const { client_id, client_secret, refresh_token } = project.youtube_creds;
 
     try {
-        // 3. Get fresh access token
+        // 2. Get fresh access token
         const auth = await getAuthenticatedClient(client_id, client_secret, refresh_token);
         const { token } = await auth.getAccessToken();
+        if (!token) throw new Error("Failed to get YouTube access token. Re-connect YouTube.");
 
-        if (!token) {
-            throw new Error("Failed to get YouTube access token. Re-connect YouTube in project settings.");
-        }
-
-        // 4. Get video file size for chunked upload
+        // 3. Get video file size
         const headRes = await fetch(job.video_url, { method: "HEAD" });
         const contentLength = headRes.headers.get("content-length");
         const fileSize = contentLength ? parseInt(contentLength) : 0;
-        console.log(`Video file size: ${(fileSize / 1024 / 1024).toFixed(1)} MB`);
 
-        // 5. Create resumable upload session via YouTube API
-        const title = inputTitle || job.title_text || `My Video ${new Date().toLocaleDateString()}`;
-        const description = inputDesc || `Created with Makine Video AI\n\n#shorts`;
-        const tags = Array.isArray(inputTags) ? inputTags : ["music", "video", "creator"];
-        const privacyStatus = inputPrivacy || "private";
-
-        const metadata = {
-            snippet: {
-                title: title.substring(0, 100),
-                description,
-                tags,
-                categoryId: "22",
-            },
-            status: {
-                privacyStatus,
-                selfDeclaredMadeForKids: false,
-                ...(publishAt ? { publishAt } : {}),
-            },
-        };
-
-        const initHeaders: Record<string, string> = {
-            "Authorization": `Bearer ${token}`,
-            "Content-Type": "application/json; charset=UTF-8",
-            "X-Upload-Content-Type": "video/mp4",
-        };
-        if (fileSize > 0) {
-            initHeaders["X-Upload-Content-Length"] = fileSize.toString();
-        }
-
-        // Initiate resumable upload session
-        const initResponse = await fetch(
-            "https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status",
-            {
-                method: "POST",
-                headers: initHeaders,
-                body: JSON.stringify(metadata),
-            }
-        );
-
-        if (!initResponse.ok) {
-            const errText = await initResponse.text();
-            console.error("YouTube upload init failed:", initResponse.status, errText);
-            throw new Error(`YouTube rejected the upload: ${initResponse.status}`);
-        }
-
-        // The resumable upload URL is in the Location header
-        const uploadUrl = initResponse.headers.get("location");
-        if (!uploadUrl) {
-            throw new Error("YouTube did not return an upload URL");
-        }
-
-        console.log(`Resumable upload session created for job ${id}. File: ${(fileSize / 1024 / 1024).toFixed(0)} MB`);
+        console.log(`[publish-init] Job ${id}: token OK, fileSize ${(fileSize / 1024 / 1024).toFixed(1)} MB`);
 
         return NextResponse.json({
-            uploadUrl,
+            accessToken: token,
             videoUrl: job.video_url,
             fileSize,
         });
 
     } catch (error: any) {
-        console.error("YouTube Upload Init Error:", error?.message || error);
-        return NextResponse.json({ error: error?.message || "Failed to create upload session" }, { status: 500 });
+        console.error("[publish-init] Error:", error?.message);
+        return NextResponse.json({ error: error?.message || "Failed" }, { status: 500 });
     }
 }
