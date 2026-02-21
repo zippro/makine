@@ -51,13 +51,30 @@ export function UploadQueueProvider({ children }: { children: React.ReactNode })
                 body: JSON.stringify(task.metadata),
             });
 
-            // Handle non-JSON responses (e.g. Vercel timeout HTML pages)
-            const contentType = res.headers.get("content-type") || "";
-            if (!contentType.includes("application/json")) {
-                throw new Error(res.status === 504 ? "Upload timed out. The video may be too large." : `Server error (${res.status})`);
+            // Try to parse JSON response — may fail on timeout/empty responses
+            let data: any;
+            try {
+                const text = await res.text();
+                if (!text || text.trim().length === 0) {
+                    throw new Error("Empty response — the upload likely timed out. Try again or check if the video appeared on YouTube.");
+                }
+                // Check if response is HTML (Vercel error page)
+                if (text.trim().startsWith("<!") || text.trim().startsWith("<html")) {
+                    throw new Error(
+                        res.status === 504 || res.status === 502
+                            ? "Upload timed out — the video is too large for the current server plan. Check YouTube Studio to see if it was partially uploaded."
+                            : `Server error (${res.status}). Please try again.`
+                    );
+                }
+                data = JSON.parse(text);
+            } catch (parseErr: any) {
+                // If it's our custom error, re-throw it
+                if (parseErr.message && !parseErr.message.includes("JSON")) {
+                    throw parseErr;
+                }
+                // JSON parse error — response was truncated
+                throw new Error("Upload timed out — the server didn't respond in time. The video may still be uploading to YouTube. Check YouTube Studio.");
             }
-
-            const data = await res.json();
 
             if (!res.ok) {
                 throw new Error(data.error || "Upload failed");
