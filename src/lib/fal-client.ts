@@ -2,7 +2,7 @@ import * as fal from "@fal-ai/serverless-client";
 
 // Configure fal.ai with server-side API key
 fal.config({
-    credentials: process.env.FAL_KEY!,
+    credentials: process.env.FAL_AI_KEY!,
 });
 
 // ─── Types ───────────────────────────────────────────────────────────────────
