@@ -224,6 +224,17 @@ export default function CreatorImagePage() {
         setError(null);
         setResults([]);
         try {
+            // Map strength to prompt style for more varied results
+            const strengthPrompts: Record<string, string> = {
+                low: 'Recreate this image with very subtle differences in details and coloring',
+                medium: 'Reimagine this image with noticeable creative changes to composition, color palette, and artistic style while keeping the same subject',
+                high: 'Create a dramatically different artistic interpretation of this image with a completely new style, bold color changes, and transformed composition',
+            };
+            const variationPrompt = strengthPrompts[varStrength] || strengthPrompts.medium;
+
+            // Always use a random seed for variety
+            const randomSeed = varSeed ? parseInt(varSeed) : Math.floor(Math.random() * 999999999);
+
             // Step 1: Submit to fal.ai queue
             const submitRes = await fetch('/api/creator/image/variations', {
                 method: 'POST',
@@ -233,9 +244,10 @@ export default function CreatorImagePage() {
                     folder: selectedFolder,
                     baseImageId: baseImage.id,
                     numImages: varNumImages,
-                    prompt: `Create a variation of this image`,
-                    seed: varSeed ? parseInt(varSeed) : undefined,
+                    prompt: variationPrompt,
+                    seed: randomSeed,
                     imageSize: varImageSize,
+                    strength: varStrength,
                 }),
             });
             const submitData = await submitRes.json();
@@ -279,7 +291,7 @@ export default function CreatorImagePage() {
                     projectId: currentProject.id,
                     folder: selectedFolder,
                     baseImageId: baseImage.id,
-                    prompt: `Create a variation of this image`,
+                    prompt: variationPrompt,
                     imageSize: varImageSize,
                 }),
             });

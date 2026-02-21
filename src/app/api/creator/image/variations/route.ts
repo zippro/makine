@@ -9,7 +9,7 @@ export async function POST(request: NextRequest) {
     try {
         const supabase = createAdminClient();
         const body = await request.json();
-        const { projectId, folder, baseImageId, prompt, numImages, seed, imageSize, action, statusUrl, responseUrl } = body;
+        const { projectId, folder, baseImageId, prompt, numImages, seed, imageSize, action, statusUrl, responseUrl, strength } = body;
 
         // ── Step 2: Poll status ──────────────────────────────────────────
         if (action === "status") {
@@ -96,14 +96,18 @@ export async function POST(request: NextRequest) {
         const size = IMAGE_SIZE_PRESETS[imageSize] ? imageSize : "landscape_16_9";
         const editPrompt = prompt || "Create a variation of this image";
 
-        console.log(`[Variations] Submitting ${n} variations of image ${baseImageId}`);
+        console.log(`[Variations] Submitting ${n} variations of image ${baseImageId}, strength=${strength}`);
+
+        // Map strength to guidance_scale: lower guidance = more creative freedom
+        const guidanceMap: Record<string, number> = { low: 3.5, medium: 2.0, high: 1.0 };
+        const guidanceScale = guidanceMap[strength] || 2.0;
 
         const submitResult = await submitToFal("fal-ai/flux-2/turbo/edit", {
             prompt: editPrompt,
             image_urls: [baseImage.url],
             image_size: size,
             num_images: n,
-            guidance_scale: 2.5,
+            guidance_scale: guidanceScale,
             ...(seed !== undefined ? { seed } : {}),
             enable_safety_checker: true,
             output_format: "png",
