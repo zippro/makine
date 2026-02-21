@@ -303,7 +303,7 @@ export function JobHistory({ limit }: JobHistoryProps) {
                                 {/* YouTube Status Icon */}
                                 {job.youtube_status === 'published' && (
                                     <a
-                                        href={job.youtube_url || '#'}
+                                        href={job.youtube_id ? `https://youtu.be/${job.youtube_id}` : '#'}
                                         target="_blank"
                                         rel="noopener noreferrer"
                                         onClick={(e) => e.stopPropagation()}
@@ -315,7 +315,7 @@ export function JobHistory({ limit }: JobHistoryProps) {
                                 )}
                                 {job.youtube_status === 'scheduled' && (
                                     <a
-                                        href={job.youtube_url || '#'}
+                                        href={job.youtube_id ? `https://youtu.be/${job.youtube_id}` : '#'}
                                         target="_blank"
                                         rel="noopener noreferrer"
                                         onClick={(e) => e.stopPropagation()}

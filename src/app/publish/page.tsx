@@ -207,8 +207,8 @@ function JobCard({ job, status, onPreview, onPublish }: {
                 <div className="text-xs text-green-500 flex items-center gap-1 mb-2">
                     <CheckCircle className="w-3 h-3" />
                     Published
-                    {job.youtube_url && (
-                        <a href={job.youtube_url} target="_blank" rel="noopener noreferrer" className="ml-1 hover:text-green-400">
+                    {job.youtube_id && (
+                        <a href={`https://youtu.be/${job.youtube_id}`} target="_blank" rel="noopener noreferrer" className="ml-1 hover:text-green-400">
                             <ExternalLink className="w-3 h-3" />
                         </a>
                     )}
@@ -238,9 +238,9 @@ function JobCard({ job, status, onPreview, onPublish }: {
                         Edit Schedule
                     </button>
                 )}
-                {status === 'published' && job.youtube_url && (
+                {status === 'published' && job.youtube_id && (
                     <a
-                        href={job.youtube_url}
+                        href={`https://youtu.be/${job.youtube_id}`}
                         target="_blank"
                         rel="noopener noreferrer"
                         onClick={(e) => e.stopPropagation()}

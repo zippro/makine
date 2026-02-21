@@ -90,8 +90,7 @@ export interface VideoJob {
   updated_at: string;
   progress?: number; // 0-100
   youtube_status?: string; // 'none' | 'uploaded' | 'scheduled' | 'published'
-  youtube_url?: string;
-  youtube_video_id?: string;
+  youtube_id?: string; // YouTube video ID
   youtube_draft?: {
     title: string;
     description: string;

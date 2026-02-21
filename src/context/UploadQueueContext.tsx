@@ -206,14 +206,21 @@ export function UploadQueueProvider({ children }: { children: React.ReactNode })
                     // Update youtube_status in DB
                     const supabase = createClient();
                     const ytStatus = task.metadata.publishAt ? 'scheduled' : 'published';
-                    await supabase
+                    const updateData: any = {
+                        youtube_status: ytStatus,
+                        youtube_id: ytData.id,
+                    };
+                    if (task.metadata.publishAt) {
+                        updateData.youtube_scheduled_at = task.metadata.publishAt;
+                    }
+                    const { error: dbError } = await supabase
                         .from('video_jobs')
-                        .update({
-                            youtube_status: ytStatus,
-                            youtube_url: youtubeUrl,
-                            youtube_video_id: ytData.id,
-                        })
+                        .update(updateData)
                         .eq('id', task.jobId);
+
+                    if (dbError) {
+                        console.error('[Upload] DB update error:', dbError);
+                    }
 
                     console.log(`[Upload] ✅ Complete! URL: ${youtubeUrl} (${min}m ${sec}s), status: ${ytStatus}`);
                     updateTask(task.id, {
