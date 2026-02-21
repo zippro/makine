@@ -1,10 +1,8 @@
-
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { google } from "googleapis";
-import { Readable, PassThrough } from "stream";
 
-export const maxDuration = 300;
+export const maxDuration = 30; // Only needs to create the upload session, not transfer data
 
 async function getAuthenticatedClient(clientId: string, clientSecret: string, refreshToken: string) {
     const oauth2Client = new google.auth.OAuth2(
@@ -16,6 +14,11 @@ async function getAuthenticatedClient(clientId: string, clientSecret: string, re
     return oauth2Client;
 }
 
+/**
+ * Creates a YouTube resumable upload session and returns the upload URL.
+ * The client (browser) then uploads the video directly to YouTube using this URL.
+ * This bypasses Vercel's timeout/memory limits since data never flows through the server.
+ */
 export async function POST(
     request: NextRequest,
     { params }: { params: Promise<{ id: string }> }
@@ -68,66 +71,70 @@ export async function POST(
     const { client_id, client_secret, refresh_token } = project.youtube_creds;
 
     try {
-        // 3. Authenticate
+        // 3. Get fresh access token
         const auth = await getAuthenticatedClient(client_id, client_secret, refresh_token);
-        const youtube = google.youtube({ version: "v3", auth });
+        const { token } = await auth.getAccessToken();
 
-        // 4. Fetch video and pipe directly to YouTube (single pass, low memory)
-        console.log("Fetching video from:", job.video_url.substring(0, 80) + "...");
-        const videoResponse = await fetch(job.video_url);
-        if (!videoResponse.ok || !videoResponse.body) {
-            throw new Error(`Failed to download video: ${videoResponse.status} ${videoResponse.statusText}`);
+        if (!token) {
+            throw new Error("Failed to get YouTube access token. Re-connect YouTube in project settings.");
         }
 
-        // Use PassThrough to pipe web stream directly to YouTube API
-        const passThrough = new PassThrough();
-        // @ts-expect-error - Web ReadableStream to Node Readable type mismatch
-        const nodeStream = Readable.fromWeb(videoResponse.body);
-        nodeStream.pipe(passThrough);
-
-        const contentLength = videoResponse.headers.get("content-length");
-        console.log(`Video size: ${contentLength ? (parseInt(contentLength) / 1024 / 1024).toFixed(1) + " MB" : "unknown"}`);
-
-        // 5. Upload to YouTube
+        // 4. Create resumable upload session via YouTube API
         const title = inputTitle || job.title_text || `My Video ${new Date().toLocaleDateString()}`;
         const description = inputDesc || `Created with Makine Video AI\n\n#shorts`;
         const tags = Array.isArray(inputTags) ? inputTags : ["music", "video", "creator"];
         const privacyStatus = inputPrivacy || "private";
 
-        console.log("Starting YouTube upload...");
-        const startTime = Date.now();
-
-        const res = await youtube.videos.insert({
-            part: ["snippet", "status"],
-            requestBody: {
-                snippet: {
-                    title: title.substring(0, 100),
-                    description,
-                    tags,
-                    categoryId: "22",
-                },
-                status: {
-                    privacyStatus,
-                    selfDeclaredMadeForKids: false,
-                    publishAt: publishAt || undefined,
-                },
+        const metadata = {
+            snippet: {
+                title: title.substring(0, 100),
+                description,
+                tags,
+                categoryId: "22",
             },
-            media: {
-                body: passThrough,
+            status: {
+                privacyStatus,
+                selfDeclaredMadeForKids: false,
+                ...(publishAt ? { publishAt } : {}),
             },
-        });
+        };
 
-        const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-        console.log(`Upload complete in ${elapsed}s. YouTube ID: ${res.data.id}`);
+        // Initiate resumable upload session
+        const initResponse = await fetch(
+            "https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status",
+            {
+                method: "POST",
+                headers: {
+                    "Authorization": `Bearer ${token}`,
+                    "Content-Type": "application/json; charset=UTF-8",
+                    "X-Upload-Content-Type": "video/mp4",
+                },
+                body: JSON.stringify(metadata),
+            }
+        );
+
+        if (!initResponse.ok) {
+            const errText = await initResponse.text();
+            console.error("YouTube upload init failed:", initResponse.status, errText);
+            throw new Error(`YouTube rejected the upload: ${initResponse.status}`);
+        }
+
+        // The resumable upload URL is in the Location header
+        const uploadUrl = initResponse.headers.get("location");
+        if (!uploadUrl) {
+            throw new Error("YouTube did not return an upload URL");
+        }
+
+        console.log(`Resumable upload session created for job ${id}`);
 
         return NextResponse.json({
-            success: true,
-            youtubeId: res.data.id,
-            url: `https://youtu.be/${res.data.id}`
+            uploadUrl,
+            videoUrl: job.video_url,
+            accessToken: token,
         });
 
     } catch (error: any) {
-        console.error("YouTube Upload Error:", error?.message || error);
-        return NextResponse.json({ error: error?.message || "Upload failed" }, { status: 500 });
+        console.error("YouTube Upload Init Error:", error?.message || error);
+        return NextResponse.json({ error: error?.message || "Failed to create upload session" }, { status: 500 });
     }
 }

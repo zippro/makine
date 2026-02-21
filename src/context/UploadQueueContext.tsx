@@ -45,49 +45,70 @@ export function UploadQueueProvider({ children }: { children: React.ReactNode })
 
     const executeUpload = useCallback(async (task: UploadTask) => {
         try {
-            const res = await fetch(`/api/jobs/${task.jobId}/publish`, {
+            // Step 1: Get resumable upload URL from server (fast — no video data transferred)
+            const initRes = await fetch(`/api/jobs/${task.jobId}/publish-init`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(task.metadata),
             });
 
-            // Try to parse JSON response — may fail on timeout/empty responses
-            let data: any;
+            let initData: any;
             try {
-                const text = await res.text();
-                if (!text || text.trim().length === 0) {
-                    throw new Error("Empty response — the upload likely timed out. Try again or check if the video appeared on YouTube.");
-                }
-                // Check if response is HTML (Vercel error page)
-                if (text.trim().startsWith("<!") || text.trim().startsWith("<html")) {
-                    throw new Error(
-                        res.status === 504 || res.status === 502
-                            ? "Upload timed out — the video is too large for the current server plan. Check YouTube Studio to see if it was partially uploaded."
-                            : `Server error (${res.status}). Please try again.`
-                    );
-                }
-                data = JSON.parse(text);
-            } catch (parseErr: any) {
-                // If it's our custom error, re-throw it
-                if (parseErr.message && !parseErr.message.includes("JSON")) {
-                    throw parseErr;
-                }
-                // JSON parse error — response was truncated
-                throw new Error("Upload timed out — the server didn't respond in time. The video may still be uploading to YouTube. Check YouTube Studio.");
+                const text = await initRes.text();
+                initData = text ? JSON.parse(text) : {};
+            } catch {
+                throw new Error("Server error — could not create upload session. Please try again.");
             }
 
-            if (!res.ok) {
-                throw new Error(data.error || "Upload failed");
+            if (!initRes.ok) {
+                throw new Error(initData.error || "Failed to create upload session");
             }
+
+            const { uploadUrl, videoUrl } = initData;
+            if (!uploadUrl || !videoUrl) {
+                throw new Error("Missing upload URL or video URL from server");
+            }
+
+            // Step 2: Download video from source (nginx/Supabase) in the browser
+            console.log("[Upload] Downloading video from:", videoUrl.substring(0, 60));
+            const videoRes = await fetch(videoUrl);
+            if (!videoRes.ok) {
+                throw new Error(`Failed to download video (${videoRes.status}). Check if the video file still exists.`);
+            }
+
+            const videoBlob = await videoRes.blob();
+            console.log(`[Upload] Video downloaded: ${(videoBlob.size / 1024 / 1024).toFixed(1)} MB`);
+
+            // Step 3: Upload video directly to YouTube using resumable upload URL
+            console.log("[Upload] Uploading to YouTube...");
+            const uploadRes = await fetch(uploadUrl, {
+                method: "PUT",
+                headers: {
+                    "Content-Type": "video/mp4",
+                    "Content-Length": videoBlob.size.toString(),
+                },
+                body: videoBlob,
+            });
+
+            if (!uploadRes.ok) {
+                const errText = await uploadRes.text();
+                console.error("[Upload] YouTube upload failed:", uploadRes.status, errText);
+                throw new Error(`YouTube upload failed (${uploadRes.status}). Try again.`);
+            }
+
+            const ytData = await uploadRes.json();
+            const youtubeUrl = `https://youtu.be/${ytData.id}`;
+            console.log("[Upload] Success! YouTube URL:", youtubeUrl);
 
             setUploads(prev =>
                 prev.map(u =>
                     u.id === task.id
-                        ? { ...u, status: "success" as const, youtubeUrl: data.url }
+                        ? { ...u, status: "success" as const, youtubeUrl }
                         : u
                 )
             );
         } catch (err: any) {
+            console.error("[Upload] Error:", err.message);
             setUploads(prev =>
                 prev.map(u =>
                     u.id === task.id
