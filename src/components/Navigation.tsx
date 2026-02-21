@@ -174,11 +174,15 @@ export default function Navigation() {
                                     <div className="fixed inset-0 z-40" onClick={() => setIsCreatorOpen(false)} />
                                     <div className="absolute top-full left-0 mt-1.5 w-48 bg-card border border-border rounded-xl shadow-lg z-50 py-1.5 animate-in fade-in slide-in-from-top-2">
                                         <Link href="/creator/image" onClick={() => setIsCreatorOpen(false)}
-                                            className={`flex items-center gap-2.5 px-3 py-2 text-sm transition-colors ${pathname?.startsWith("/creator")
+                                            className={`flex items-center gap-2.5 px-3 py-2 text-sm transition-colors ${pathname?.startsWith("/creator/image")
                                                 ? "bg-purple-500/10 text-purple-400 font-medium" : "text-muted-foreground hover:text-foreground hover:bg-card-hover"}`}
                                         >
                                             <Sparkles className="h-4 w-4" /> AI Image
                                         </Link>
+                                        <div className="flex items-center gap-2.5 px-3 py-2 text-sm text-muted-foreground/50 cursor-not-allowed">
+                                            <Music className="h-4 w-4" /> AI Music
+                                            <span className="ml-auto text-[10px] bg-white/5 px-1.5 py-0.5 rounded-full">Soon</span>
+                                        </div>
                                     </div>
                                 </>
                             )}
