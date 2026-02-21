@@ -149,7 +149,8 @@ export default function CreatorImagePage() {
         setError(null);
         setResults([]);
         try {
-            const res = await fetch('/api/creator/image/text-to-image', {
+            // Step 1: Submit to fal.ai queue
+            const submitRes = await fetch('/api/creator/image/text-to-image', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -161,9 +162,53 @@ export default function CreatorImagePage() {
                     seed: seed ? parseInt(seed) : undefined,
                 }),
             });
-            const data = await res.json();
-            if (!res.ok) throw new Error(data.error || 'Generation failed');
-            setResults(data.assets || []);
+            const submitData = await submitRes.json();
+            if (!submitRes.ok) throw new Error(submitData.error || 'Submit failed');
+
+            const requestId = submitData.requestId;
+
+            // Step 2: Poll for status (client-side, every 2s, max 60s)
+            const startTime = Date.now();
+            const MAX_WAIT = 60000;
+            let completed = false;
+
+            while (Date.now() - startTime < MAX_WAIT) {
+                await new Promise(r => setTimeout(r, 2000));
+
+                const statusRes = await fetch('/api/creator/image/text-to-image', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: 'status', requestId }),
+                });
+                const statusData = await statusRes.json();
+
+                if (statusData.status === 'COMPLETED') {
+                    completed = true;
+                    break;
+                }
+                if (statusData.status === 'FAILED') {
+                    throw new Error(statusData.error || 'Generation failed');
+                }
+            }
+
+            if (!completed) throw new Error('Generation timed out — please try again');
+
+            // Step 3: Save result
+            const saveRes = await fetch('/api/creator/image/text-to-image', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    action: 'save',
+                    requestId,
+                    projectId: currentProject.id,
+                    folder: selectedFolder,
+                    prompt: prompt.trim(),
+                }),
+            });
+            const saveData = await saveRes.json();
+            if (!saveRes.ok) throw new Error(saveData.error || 'Save failed');
+            setResults(saveData.assets || []);
+
         } catch (err: any) {
             setError(err.message);
         } finally {
@@ -232,8 +277,8 @@ export default function CreatorImagePage() {
                 <button
                     onClick={() => { setActiveTab('t2i'); setResults([]); setError(null); }}
                     className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-all ${activeTab === 't2i'
-                            ? 'bg-purple-500/15 text-purple-400 shadow-sm'
-                            : 'text-muted hover:text-foreground hover:bg-card-hover'
+                        ? 'bg-purple-500/15 text-purple-400 shadow-sm'
+                        : 'text-muted hover:text-foreground hover:bg-card-hover'
                         }`}
                 >
                     <Wand2 className="w-4 h-4" />
@@ -242,8 +287,8 @@ export default function CreatorImagePage() {
                 <button
                     onClick={() => { setActiveTab('variations'); setResults([]); setError(null); }}
                     className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-all ${activeTab === 'variations'
-                            ? 'bg-purple-500/15 text-purple-400 shadow-sm'
-                            : 'text-muted hover:text-foreground hover:bg-card-hover'
+                        ? 'bg-purple-500/15 text-purple-400 shadow-sm'
+                        : 'text-muted hover:text-foreground hover:bg-card-hover'
                         }`}
                 >
                     <Shuffle className="w-4 h-4" />
@@ -500,8 +545,8 @@ function VariationsPanel({
                             key={s.value}
                             onClick={() => setStrength(s.value)}
                             className={`px-3 py-2 rounded-lg text-xs text-center transition-all border ${strength === s.value
-                                    ? 'bg-purple-500/15 border-purple-500/50 text-purple-400'
-                                    : 'border-border text-muted hover:border-purple-500/30'
+                                ? 'bg-purple-500/15 border-purple-500/50 text-purple-400'
+                                : 'border-border text-muted hover:border-purple-500/30'
                                 }`}
                         >
                             <div className="font-medium">{s.label}</div>
