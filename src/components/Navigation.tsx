@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Video, History, Image, Music, FolderOpen, Home, Clapperboard, ChevronDown, Check, ListTodo, LogOut, User, Upload, Bot, HardDrive, Sparkles } from "lucide-react";
+import { Video, History, Image, Music, FolderOpen, Home, Clapperboard, ChevronDown, Check, ListTodo, LogOut, User, Upload, Bot, HardDrive, Sparkles, BarChart3 } from "lucide-react";
 import { useProject } from "@/context/ProjectContext";
 import { createClient } from "@/lib/supabase/client";
 import AISettingsModal from "@/components/AISettingsModal";
@@ -280,6 +280,17 @@ export default function Navigation() {
                         >
                             <Upload className="h-4 w-4" />
                             <span className="hidden lg:inline">Publish</span>
+                        </Link>
+
+                        <Link
+                            href="/analytics"
+                            className={`flex items-center gap-1.5 rounded-lg px-2 sm:px-3 py-2 text-sm transition-colors ${isActive("/analytics")
+                                ? "bg-primary/10 text-primary font-medium"
+                                : "text-muted hover:text-foreground hover:bg-card"
+                                }`}
+                        >
+                            <BarChart3 className="h-4 w-4" />
+                            <span className="hidden lg:inline">Analytics</span>
                         </Link>
 
                         <div className="h-4 w-px bg-border mx-1" />
