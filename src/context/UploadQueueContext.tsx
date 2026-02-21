@@ -1,7 +1,11 @@
 "use client";
 
 import React, { createContext, useContext, useState, useCallback } from "react";
-import { X, ExternalLink, RefreshCw, CheckCircle, AlertCircle, Youtube, Minimize2, Upload } from "lucide-react";
+import { X, ExternalLink, CheckCircle, AlertCircle, Youtube, Minimize2, Upload } from "lucide-react";
+
+// ─── Config ──────────────────────────────────────────────────────────────────
+
+const CHUNK_SIZE = 50 * 1024 * 1024; // 50 MB per chunk
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -11,9 +15,9 @@ export interface UploadTask {
     title: string;
     status: "uploading" | "success" | "error";
     progress?: string;
+    percent?: number;
     youtubeUrl?: string;
     error?: string;
-    startedAt: number;
     metadata: {
         title: string;
         description: string;
@@ -52,83 +56,135 @@ export function UploadQueueProvider({ children }: { children: React.ReactNode })
     const executeUpload = useCallback(async (task: UploadTask) => {
         const startTime = Date.now();
 
-        // Show elapsed time in the toast
-        const progressInterval = setInterval(() => {
-            const elapsed = Math.round((Date.now() - startTime) / 1000);
-            const min = Math.floor(elapsed / 60);
-            const sec = elapsed % 60;
-            updateTask(task.id, {
-                progress: `Uploading to YouTube... ${min > 0 ? min + 'm ' : ''}${sec}s`
-            });
-        }, 2000);
-
         try {
-            updateTask(task.id, { progress: "Starting server-side upload..." });
-            console.log("[Upload] Starting server-side upload for job:", task.jobId);
+            // ── Step 1: Create YouTube upload session ──
+            updateTask(task.id, { progress: "Creating upload session...", percent: 0 });
+            console.log("[Upload] Creating session for job:", task.jobId);
 
-            // Use AbortController to handle timeouts
-            const controller = new AbortController();
-
-            const res = await fetch(`/api/jobs/${task.jobId}/publish`, {
+            const initRes = await fetch(`/api/jobs/${task.jobId}/publish-init`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(task.metadata),
-                signal: controller.signal,
             });
 
-            clearInterval(progressInterval);
+            const initText = await initRes.text();
+            console.log("[Upload] Init response:", initRes.status, initText.substring(0, 200));
 
-            // Parse response carefully
-            let data: any;
-            try {
-                const text = await res.text();
-                console.log("[Upload] Server response:", res.status, text.substring(0, 300));
-
-                if (!text || text.trim().length === 0) {
-                    throw new Error("Server returned empty response — the upload likely timed out. Check YouTube Studio to see if the video appeared.");
-                }
-                if (text.trim().startsWith("<!") || text.trim().startsWith("<html")) {
-                    throw new Error(
-                        res.status === 504 ? "Server timed out — the video may still be uploading. Check YouTube Studio in a few minutes."
-                            : `Server error (${res.status}). Try again.`
-                    );
-                }
-                data = JSON.parse(text);
-            } catch (parseErr: any) {
-                if (!parseErr.message.includes("JSON")) throw parseErr;
-                throw new Error("Server response was cut off — the upload may have timed out. Check YouTube Studio.");
+            if (!initRes.ok) {
+                const err = initText ? JSON.parse(initText) : {};
+                throw new Error(err.error || `Server error (${initRes.status})`);
             }
 
-            if (!res.ok) {
-                throw new Error(data.error || "Upload failed");
+            const { uploadUrl, videoUrl, fileSize } = JSON.parse(initText);
+            if (!uploadUrl) throw new Error("No upload URL returned");
+            if (!videoUrl) throw new Error("No video URL returned");
+
+            const totalMB = (fileSize / 1024 / 1024).toFixed(0);
+            const totalChunks = Math.ceil(fileSize / CHUNK_SIZE);
+            console.log(`[Upload] Session created. Video: ${totalMB} MB, ${totalChunks} chunks of ${CHUNK_SIZE / 1024 / 1024} MB`);
+
+            // ── Step 2: Upload in chunks ──
+            let bytesUploaded = 0;
+
+            for (let chunkIndex = 0; chunkIndex < totalChunks; chunkIndex++) {
+                const start = chunkIndex * CHUNK_SIZE;
+                const end = Math.min(start + CHUNK_SIZE, fileSize) - 1;
+                const chunkSize = end - start + 1;
+                const pct = Math.round((start / fileSize) * 100);
+
+                updateTask(task.id, {
+                    progress: `Downloading chunk ${chunkIndex + 1}/${totalChunks} (${pct}%)`,
+                    percent: pct,
+                });
+                console.log(`[Upload] Chunk ${chunkIndex + 1}/${totalChunks}: bytes ${start}-${end} (${(chunkSize / 1024 / 1024).toFixed(1)} MB)`);
+
+                // Download this chunk from nginx using Range header
+                const chunkRes = await fetch(videoUrl, {
+                    headers: { "Range": `bytes=${start}-${end}` },
+                });
+
+                if (!chunkRes.ok && chunkRes.status !== 206) {
+                    throw new Error(`Failed to download chunk ${chunkIndex + 1} (HTTP ${chunkRes.status})`);
+                }
+
+                const chunkBlob = await chunkRes.blob();
+                console.log(`[Upload] Downloaded chunk: ${(chunkBlob.size / 1024 / 1024).toFixed(1)} MB`);
+
+                // Upload this chunk to YouTube
+                updateTask(task.id, {
+                    progress: `Uploading chunk ${chunkIndex + 1}/${totalChunks} to YouTube (${pct}%)`,
+                    percent: pct,
+                });
+
+                const isLastChunk = (chunkIndex === totalChunks - 1);
+                const contentRange = `bytes ${start}-${end}/${fileSize}`;
+
+                const uploadRes = await fetch(uploadUrl, {
+                    method: "PUT",
+                    headers: {
+                        "Content-Length": chunkSize.toString(),
+                        "Content-Range": contentRange,
+                        "Content-Type": "video/mp4",
+                    },
+                    body: chunkBlob,
+                });
+
+                bytesUploaded = end + 1;
+
+                if (isLastChunk) {
+                    // Last chunk: YouTube returns 200/201 with video data
+                    if (uploadRes.ok) {
+                        const ytData = await uploadRes.json();
+                        const youtubeUrl = `https://youtu.be/${ytData.id}`;
+                        const elapsed = Math.round((Date.now() - startTime) / 1000);
+                        const min = Math.floor(elapsed / 60);
+                        const sec = elapsed % 60;
+
+                        console.log(`[Upload] ✅ Complete! URL: ${youtubeUrl} (${min}m ${sec}s)`);
+                        updateTask(task.id, {
+                            status: "success",
+                            youtubeUrl,
+                            progress: `Published in ${min}m ${sec}s`,
+                            percent: 100,
+                        });
+                        return;
+                    } else {
+                        const errText = await uploadRes.text();
+                        console.error("[Upload] Final chunk error:", uploadRes.status, errText);
+                        throw new Error(`YouTube rejected the final chunk (${uploadRes.status})`);
+                    }
+                } else {
+                    // Non-last chunk: YouTube returns 308 Resume Incomplete
+                    if (uploadRes.status === 308) {
+                        const range = uploadRes.headers.get("range");
+                        console.log(`[Upload] Chunk ${chunkIndex + 1} accepted. Range: ${range}`);
+                    } else if (uploadRes.ok) {
+                        // YouTube accepted early (smaller than expected)
+                        const ytData = await uploadRes.json();
+                        const youtubeUrl = `https://youtu.be/${ytData.id}`;
+                        const elapsed = Math.round((Date.now() - startTime) / 1000);
+                        console.log(`[Upload] ✅ YouTube accepted early! URL: ${youtubeUrl}`);
+                        updateTask(task.id, {
+                            status: "success",
+                            youtubeUrl,
+                            progress: `Published in ${Math.floor(elapsed / 60)}m ${elapsed % 60}s`,
+                            percent: 100,
+                        });
+                        return;
+                    } else {
+                        const errText = await uploadRes.text();
+                        console.error("[Upload] Chunk upload error:", uploadRes.status, errText);
+                        throw new Error(`YouTube rejected chunk ${chunkIndex + 1} (${uploadRes.status})`);
+                    }
+                }
             }
-
-            const elapsed = Math.round((Date.now() - startTime) / 1000);
-            const min = Math.floor(elapsed / 60);
-            const sec = elapsed % 60;
-            console.log(`[Upload] ✅ Success! URL: ${data.url}`);
-
-            updateTask(task.id, {
-                status: "success",
-                youtubeUrl: data.url,
-                progress: `Published in ${min > 0 ? min + 'm ' : ''}${sec}s`
-            });
 
         } catch (err: any) {
-            clearInterval(progressInterval);
-            console.error("[Upload] ❌ Error:", err.message);
-
-            // Check if it's a timeout-like error
-            const isTimeout = err.name === "AbortError" ||
-                err.message?.includes("timed out") ||
-                err.message?.includes("timeout") ||
-                err.message?.includes("empty response");
-
+            console.error("[Upload] ❌ FAILED:", err.message);
+            console.error("[Upload] Full error:", err);
             updateTask(task.id, {
                 status: "error",
-                error: isTimeout
-                    ? "Upload timed out — but the video may still be processing on YouTube. Check YouTube Studio."
-                    : err.message || "Upload failed"
+                error: err.message || "Upload failed",
             });
         }
     }, [updateTask]);
@@ -139,7 +195,7 @@ export function UploadQueueProvider({ children }: { children: React.ReactNode })
             jobId,
             title,
             status: "uploading",
-            startedAt: Date.now(),
+            percent: 0,
             progress: "Starting...",
             metadata,
         };
@@ -153,11 +209,9 @@ export function UploadQueueProvider({ children }: { children: React.ReactNode })
             const task = prev.find(u => u.id === taskId);
             if (!task) return prev;
             const updated = prev.map(u =>
-                u.id === taskId
-                    ? { ...u, status: "uploading" as const, error: undefined, progress: "Retrying...", startedAt: Date.now() }
-                    : u
+                u.id === taskId ? { ...u, status: "uploading" as const, error: undefined, progress: "Retrying...", percent: 0 } : u
             );
-            executeUpload({ ...task, status: "uploading", error: undefined, progress: "Retrying...", startedAt: Date.now() });
+            executeUpload({ ...task, status: "uploading", error: undefined, progress: "Retrying...", percent: 0 });
             return updated;
         });
     }, [executeUpload]);
@@ -176,10 +230,7 @@ export function UploadQueueProvider({ children }: { children: React.ReactNode })
             {uploads.length > 0 && (
                 <div className="fixed bottom-6 right-6 z-[60] flex flex-col gap-3 max-w-md w-full">
                     <div className="flex justify-end">
-                        <button
-                            onClick={() => setMinimized(!minimized)}
-                            className="p-1.5 bg-card border border-border rounded-lg text-muted hover:text-foreground transition-colors shadow-lg"
-                        >
+                        <button onClick={() => setMinimized(!minimized)} className="p-1.5 bg-card border border-border rounded-lg text-muted hover:text-foreground transition-colors shadow-lg">
                             {minimized ? (
                                 <div className="flex items-center gap-1.5 px-1">
                                     <Youtube className="w-3.5 h-3.5 text-red-500" />
@@ -217,9 +268,20 @@ function UploadToast({ task, onRetry, onDismiss }: { task: UploadTask; onRetry: 
                 </div>
                 <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium truncate">{task.title}</p>
-                    {task.status === "uploading" && task.progress && (
-                        <p className="text-xs text-blue-400 mt-0.5">{task.progress}</p>
+
+                    {task.status === "uploading" && (
+                        <div className="mt-1.5">
+                            {/* Progress bar */}
+                            <div className="w-full bg-border/50 rounded-full h-1.5 mb-1">
+                                <div
+                                    className="bg-blue-500 h-1.5 rounded-full transition-all duration-500"
+                                    style={{ width: `${task.percent || 0}%` }}
+                                />
+                            </div>
+                            <p className="text-xs text-blue-400">{task.progress}</p>
+                        </div>
                     )}
+
                     {task.status === "success" && (
                         <div className="flex items-center gap-2 mt-1">
                             <span className="text-xs text-green-400">{task.progress || "Published!"}</span>
@@ -230,6 +292,7 @@ function UploadToast({ task, onRetry, onDismiss }: { task: UploadTask; onRetry: 
                             )}
                         </div>
                     )}
+
                     {task.status === "error" && (
                         <div className="mt-1">
                             <p className="text-xs text-red-400 line-clamp-3">{task.error}</p>

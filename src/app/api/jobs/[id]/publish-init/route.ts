@@ -79,7 +79,13 @@ export async function POST(
             throw new Error("Failed to get YouTube access token. Re-connect YouTube in project settings.");
         }
 
-        // 4. Create resumable upload session via YouTube API
+        // 4. Get video file size for chunked upload
+        const headRes = await fetch(job.video_url, { method: "HEAD" });
+        const contentLength = headRes.headers.get("content-length");
+        const fileSize = contentLength ? parseInt(contentLength) : 0;
+        console.log(`Video file size: ${(fileSize / 1024 / 1024).toFixed(1)} MB`);
+
+        // 5. Create resumable upload session via YouTube API
         const title = inputTitle || job.title_text || `My Video ${new Date().toLocaleDateString()}`;
         const description = inputDesc || `Created with Makine Video AI\n\n#shorts`;
         const tags = Array.isArray(inputTags) ? inputTags : ["music", "video", "creator"];
@@ -99,16 +105,21 @@ export async function POST(
             },
         };
 
+        const initHeaders: Record<string, string> = {
+            "Authorization": `Bearer ${token}`,
+            "Content-Type": "application/json; charset=UTF-8",
+            "X-Upload-Content-Type": "video/mp4",
+        };
+        if (fileSize > 0) {
+            initHeaders["X-Upload-Content-Length"] = fileSize.toString();
+        }
+
         // Initiate resumable upload session
         const initResponse = await fetch(
             "https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status",
             {
                 method: "POST",
-                headers: {
-                    "Authorization": `Bearer ${token}`,
-                    "Content-Type": "application/json; charset=UTF-8",
-                    "X-Upload-Content-Type": "video/mp4",
-                },
+                headers: initHeaders,
                 body: JSON.stringify(metadata),
             }
         );
@@ -125,12 +136,12 @@ export async function POST(
             throw new Error("YouTube did not return an upload URL");
         }
 
-        console.log(`Resumable upload session created for job ${id}`);
+        console.log(`Resumable upload session created for job ${id}. File: ${(fileSize / 1024 / 1024).toFixed(0)} MB`);
 
         return NextResponse.json({
             uploadUrl,
             videoUrl: job.video_url,
-            accessToken: token,
+            fileSize,
         });
 
     } catch (error: any) {
