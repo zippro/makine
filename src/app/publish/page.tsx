@@ -40,7 +40,7 @@ export default function PublishPage() {
 
     const scheduledJobs = jobs.filter(j => j.youtube_status === 'scheduled');
     const publishedJobs = jobs.filter(j => j.youtube_status === 'published');
-    const readyJobs = jobs.filter(j => !j.youtube_status || j.youtube_status === 'none' || j.youtube_status === 'uploaded');
+    const readyJobs = jobs.filter(j => j.youtube_status !== 'scheduled' && j.youtube_status !== 'published');
 
     return (
         <div className="min-h-screen bg-background p-8">

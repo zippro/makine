@@ -325,8 +325,8 @@ export function JobHistory({ limit }: JobHistoryProps) {
                                         <Calendar className="w-4 h-4" />
                                     </a>
                                 )}
-                                {/* Publish button - show only if not yet published/scheduled */}
-                                {(!job.youtube_status || job.youtube_status === 'none' || job.youtube_status === 'uploaded') && (
+                                {/* Publish button - show for any video not yet published/scheduled */}
+                                {job.youtube_status !== 'published' && job.youtube_status !== 'scheduled' && (
                                     <button
                                         onClick={(e) => {
                                             e.preventDefault();
