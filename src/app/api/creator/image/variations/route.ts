@@ -8,7 +8,7 @@ export async function POST(request: NextRequest) {
     try {
         const supabase = createAdminClient();
         const body = await request.json();
-        const { projectId, folder, baseImageId, numImages, strength, seed, imageSize } = body;
+        const { projectId, folder, baseImageId, prompt, numImages, seed, imageSize } = body;
 
         // Validation
         if (!projectId) {
@@ -33,23 +33,16 @@ export async function POST(request: NextRequest) {
         const n = Math.min(Math.max(numImages || 1, 1), 4);
         const size = IMAGE_SIZE_PRESETS[imageSize] ? imageSize : "landscape_16_9";
         const targetFolder = folder || baseImage.folder || "/";
+        const editPrompt = prompt || "Create a variation of this image";
 
-        // Map strength label to value
-        const strengthMap: Record<string, number> = {
-            low: 0.3,
-            medium: 0.6,
-            high: 0.85,
-        };
-        const strengthValue = strengthMap[strength] || 0.6;
+        console.log(`[Variations] Generating ${n} variations of image ${baseImageId}`);
 
-        console.log(`[Variations] Generating ${n} variations of image ${baseImageId}, strength=${strengthValue}`);
-
-        // Call fal.ai
+        // Call fal.ai Flux 2 Turbo Edit
         const startTime = Date.now();
         const result = await generateImageVariation({
             imageUrl: baseImage.url,
+            prompt: editPrompt,
             num_images: n,
-            strength: strengthValue,
             seed: seed !== undefined ? seed : undefined,
             image_size: size,
         });
@@ -103,11 +96,11 @@ export async function POST(request: NextRequest) {
                     folder: targetFolder,
                     source: "generated",
                     generation_meta: {
-                        model: "fal-ai/flux/schnell/redux",
+                        model: "fal-ai/flux-2/turbo/edit",
+                        prompt: editPrompt,
                         baseImageId,
                         baseImageUrl: baseImage.url,
                         image_size: size,
-                        strength: strengthValue,
                         seed: result.seed,
                         index: i,
                         generated_at: new Date().toISOString(),

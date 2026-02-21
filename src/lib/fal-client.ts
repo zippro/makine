@@ -1,3 +1,6 @@
+// fal.ai service layer — Direct REST calls to Flux 2 Turbo
+// Uses the same auth pattern as ai.ts (FAL_AI_KEY + Key header)
+
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 export interface TextToImageRequest {
@@ -5,16 +8,17 @@ export interface TextToImageRequest {
     image_size?: string;
     num_images?: number;
     seed?: number;
+    guidance_scale?: number;
     enable_safety_checker?: boolean;
 }
 
 export interface ImageVariationRequest {
     imageUrl: string;
-    prompt?: string;
+    prompt: string; // required for edit endpoint
     num_images?: number;
-    strength?: number;
     seed?: number;
     image_size?: string;
+    guidance_scale?: number;
 }
 
 export interface FalImage {
@@ -41,7 +45,7 @@ export const IMAGE_SIZE_PRESETS: Record<string, { label: string; value: string }
     "portrait_16_9": { label: "Portrait (9:16)", value: "portrait_16_9" },
 };
 
-// ─── Direct REST API (no library dependency issues) ──────────────────────────
+// ─── API Base (same as ai.ts uses for video) ─────────────────────────────────
 
 const FAL_API_BASE = "https://queue.fal.run";
 
@@ -75,13 +79,14 @@ async function falRequest(model: string, input: Record<string, any>): Promise<an
 
     // If we got a direct result (synchronous), return it
     if (submitData.images) {
+        console.log(`[fal.ai] Got synchronous result with ${submitData.images.length} images`);
         return submitData;
     }
 
     // Otherwise poll the queue
     const requestId = submitData.request_id;
-    const statusUrl = submitData.status_url || `https://queue.fal.run/${model}/requests/${requestId}/status`;
-    const resultUrl = submitData.response_url || `https://queue.fal.run/${model}/requests/${requestId}`;
+    const statusUrl = `${FAL_API_BASE}/${model}/requests/${requestId}/status`;
+    const resultUrl = `${FAL_API_BASE}/${model}/requests/${requestId}`;
 
     console.log(`[fal.ai] Queued: ${requestId}, polling...`);
 
@@ -96,8 +101,9 @@ async function falRequest(model: string, input: Record<string, any>): Promise<an
         if (!statusRes.ok) continue;
         const status = await statusRes.json();
 
+        console.log(`[fal.ai] Poll ${i + 1}: status=${status.status}`);
+
         if (status.status === "COMPLETED") {
-            // Fetch result
             const resultRes = await fetch(resultUrl, {
                 headers: { "Authorization": `Key ${key}` },
             });
@@ -132,22 +138,36 @@ async function withRetry<T>(fn: () => Promise<T>): Promise<T> {
 
 // ─── Public API ──────────────────────────────────────────────────────────────
 
+/**
+ * Generate images from text prompt using Flux 2 Turbo
+ * Endpoint: fal-ai/flux-2/turbo
+ */
 export async function generateTextToImage(req: TextToImageRequest): Promise<FalResult> {
-    return withRetry(() => falRequest("fal-ai/flux/schnell", {
+    return withRetry(() => falRequest("fal-ai/flux-2/turbo", {
         prompt: req.prompt,
-        image_size: req.image_size || "landscape_16_9",
+        image_size: req.image_size || "landscape_4_3",
         num_images: req.num_images || 1,
+        guidance_scale: req.guidance_scale || 2.5,
         ...(req.seed !== undefined ? { seed: req.seed } : {}),
         enable_safety_checker: req.enable_safety_checker ?? true,
+        output_format: "png",
     }));
 }
 
+/**
+ * Generate image variations (edit) using Flux 2 Turbo
+ * Endpoint: fal-ai/flux-2/turbo/edit
+ * The edit endpoint takes image_urls (array) and a prompt
+ */
 export async function generateImageVariation(req: ImageVariationRequest): Promise<FalResult> {
-    return withRetry(() => falRequest("fal-ai/flux/schnell/redux", {
-        image_url: req.imageUrl,
-        ...(req.prompt ? { prompt: req.prompt } : {}),
-        image_size: req.image_size || "landscape_16_9",
+    return withRetry(() => falRequest("fal-ai/flux-2/turbo/edit", {
+        prompt: req.prompt,
+        image_urls: [req.imageUrl],
+        image_size: req.image_size || "landscape_4_3",
         num_images: req.num_images || 1,
+        guidance_scale: req.guidance_scale || 2.5,
         ...(req.seed !== undefined ? { seed: req.seed } : {}),
+        enable_safety_checker: true,
+        output_format: "png",
     }));
 }

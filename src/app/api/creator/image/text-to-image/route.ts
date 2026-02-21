@@ -25,10 +25,6 @@ export async function POST(request: NextRequest) {
         const size = IMAGE_SIZE_PRESETS[imageSize] ? imageSize : "landscape_16_9";
         const targetFolder = folder || "/";
 
-        // Debug: check if API key is present
-        const hasKey = !!process.env.FAL_AI_KEY;
-        const keyPrefix = process.env.FAL_AI_KEY ? process.env.FAL_AI_KEY.substring(0, 8) + '...' : 'MISSING';
-        console.log(`[T2I] FAL_AI_KEY present: ${hasKey}, prefix: ${keyPrefix}`);
         console.log(`[T2I] Generating ${n} image(s): "${prompt.substring(0, 60)}..." size=${size}`);
 
         // Call fal.ai
@@ -92,7 +88,7 @@ export async function POST(request: NextRequest) {
                     source: "generated",
                     generation_meta: {
                         prompt: prompt.trim(),
-                        model: "fal-ai/flux/schnell",
+                        model: "fal-ai/flux-2/turbo",
                         image_size: size,
                         seed: result.seed,
                         index: i,
