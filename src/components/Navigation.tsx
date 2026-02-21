@@ -14,13 +14,15 @@ export default function Navigation() {
     const { currentProject, projects, selectProject, isLoading, user } = useProject();
     const [isDropdownOpen, setIsDropdownOpen] = useState(false);
     const [isCreatorOpen, setIsCreatorOpen] = useState(false);
+    const [isProducerOpen, setIsProducerOpen] = useState(false);
     const [isDeployOpen, setIsDeployOpen] = useState(false);
     const [nickname, setNickname] = useState<string | null>(null);
     const [mentionCount, setMentionCount] = useState(0);
     const [showAISettings, setShowAISettings] = useState(false);
     const supabase = createClient();
 
-    const isCreatorActive = pathname?.startsWith("/creator") || pathname === "/upload-images" || pathname === "/music-library";
+    const isCreatorActive = pathname?.startsWith("/creator");
+    const isProducerActive = pathname === "/upload-images" || pathname === "/music-library" || pathname === "/animations";
     const isDeployActive = pathname === "/create-video";
 
     // Fetch user nickname and mention count
@@ -156,7 +158,7 @@ export default function Navigation() {
                         {/* Creator Dropdown */}
                         <div className="relative">
                             <button
-                                onClick={() => { setIsCreatorOpen(!isCreatorOpen); setIsDeployOpen(false); }}
+                                onClick={() => { setIsCreatorOpen(!isCreatorOpen); setIsProducerOpen(false); setIsDeployOpen(false); }}
                                 className={`flex items-center gap-1.5 rounded-lg px-2 sm:px-3 py-2 text-sm transition-colors ${isCreatorActive
                                     ? "bg-purple-500/10 text-purple-400 font-medium"
                                     : "text-muted hover:text-purple-400 hover:bg-card"
@@ -177,33 +179,51 @@ export default function Navigation() {
                                         >
                                             <Sparkles className="h-4 w-4" /> AI Image
                                         </Link>
-                                        <Link href="/upload-images" onClick={() => setIsCreatorOpen(false)}
-                                            className={`flex items-center gap-2.5 px-3 py-2 text-sm transition-colors ${isActive("/upload-images")
-                                                ? "bg-primary/10 text-primary font-medium" : "text-muted-foreground hover:text-foreground hover:bg-card-hover"}`}
-                                        >
-                                            <Image className="h-4 w-4" /> Images
-                                        </Link>
-                                        <Link href="/music-library" onClick={() => setIsCreatorOpen(false)}
-                                            className={`flex items-center gap-2.5 px-3 py-2 text-sm transition-colors ${isActive("/music-library")
-                                                ? "bg-primary/10 text-primary font-medium" : "text-muted-foreground hover:text-foreground hover:bg-card-hover"}`}
-                                        >
-                                            <Music className="h-4 w-4" /> Music
-                                        </Link>
                                     </div>
                                 </>
                             )}
                         </div>
 
-                        <Link
-                            href="/animations"
-                            className={`flex items-center gap-1.5 rounded-lg px-2 sm:px-3 py-2 text-sm transition-colors ${isActive("/animations")
-                                ? "bg-primary/10 text-primary font-medium"
-                                : "text-muted hover:text-foreground hover:bg-card"
-                                }`}
-                        >
-                            <Video className="h-4 w-4" />
-                            <span className="hidden lg:inline">Anims</span>
-                        </Link>
+                        {/* Producer Dropdown */}
+                        <div className="relative">
+                            <button
+                                onClick={() => { setIsProducerOpen(!isProducerOpen); setIsCreatorOpen(false); setIsDeployOpen(false); }}
+                                className={`flex items-center gap-1.5 rounded-lg px-2 sm:px-3 py-2 text-sm transition-colors ${isProducerActive
+                                    ? "bg-primary/10 text-primary font-medium"
+                                    : "text-muted hover:text-foreground hover:bg-card"
+                                    }`}
+                            >
+                                <FolderOpen className="h-4 w-4" />
+                                <span className="hidden lg:inline">Producer</span>
+                                <ChevronDown className={`w-3 h-3 transition-transform ${isProducerOpen ? 'rotate-180' : ''}`} />
+                            </button>
+
+                            {isProducerOpen && (
+                                <>
+                                    <div className="fixed inset-0 z-40" onClick={() => setIsProducerOpen(false)} />
+                                    <div className="absolute top-full left-0 mt-1.5 w-48 bg-card border border-border rounded-xl shadow-lg z-50 py-1.5 animate-in fade-in slide-in-from-top-2">
+                                        <Link href="/upload-images" onClick={() => setIsProducerOpen(false)}
+                                            className={`flex items-center gap-2.5 px-3 py-2 text-sm transition-colors ${isActive("/upload-images")
+                                                ? "bg-primary/10 text-primary font-medium" : "text-muted-foreground hover:text-foreground hover:bg-card-hover"}`}
+                                        >
+                                            <Image className="h-4 w-4" /> Images
+                                        </Link>
+                                        <Link href="/music-library" onClick={() => setIsProducerOpen(false)}
+                                            className={`flex items-center gap-2.5 px-3 py-2 text-sm transition-colors ${isActive("/music-library")
+                                                ? "bg-primary/10 text-primary font-medium" : "text-muted-foreground hover:text-foreground hover:bg-card-hover"}`}
+                                        >
+                                            <Music className="h-4 w-4" /> Music
+                                        </Link>
+                                        <Link href="/animations" onClick={() => setIsProducerOpen(false)}
+                                            className={`flex items-center gap-2.5 px-3 py-2 text-sm transition-colors ${isActive("/animations")
+                                                ? "bg-primary/10 text-primary font-medium" : "text-muted-foreground hover:text-foreground hover:bg-card-hover"}`}
+                                        >
+                                            <Video className="h-4 w-4" /> Animations
+                                        </Link>
+                                    </div>
+                                </>
+                            )}
+                        </div>
 
                         <div className="h-4 w-px bg-border mx-1" />
 
