@@ -8,7 +8,7 @@ import AnimationTypeSelect from '@/components/AnimationTypeSelect';
 import UploadProgress, { UploadStatus } from '@/components/UploadProgress';
 import { useProject } from '@/context/ProjectContext';
 import { MoveAssetModal } from '@/components/MoveAssetModal';
-import { Folder, Edit2, Trash2 } from 'lucide-react';
+import { Folder, Edit2, Trash2, Video, Loader2 } from 'lucide-react';
 
 export default function UploadImagesPage() {
     const { currentProject } = useProject();
@@ -348,6 +348,52 @@ export default function UploadImagesPage() {
             }
         } catch (err) {
             alert('Failed to delete image');
+        }
+    };
+
+    const [animatingIds, setAnimatingIds] = useState<Set<string>>(new Set());
+
+    const handleAnimateExisting = async (img: any) => {
+        if (!currentProject) return;
+        setAnimatingIds(prev => new Set(prev).add(img.id));
+        try {
+            const supabase = createClient();
+            const { data: animation, error: animError } = await supabase
+                .from('animations')
+                .insert({
+                    image_id: img.id,
+                    duration: duration,
+                    status: 'queued',
+                    project_id: currentProject.id,
+                    folder: img.folder || '/'
+                })
+                .select()
+                .single();
+
+            if (animError) throw animError;
+
+            // Trigger generation
+            await fetch('/api/animations/generate', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    animation_id: animation.id,
+                    image_url: img.url,
+                    duration: duration,
+                    prompt: '',
+                    animation_prompt: currentProject.animation_prompts?.find((p: any) => p.id === selectedTypeId)?.prompt || ''
+                }),
+            });
+
+            alert(`Animation queued! View it in the Animations page.`);
+        } catch (err: any) {
+            alert(`Failed to animate: ${err.message}`);
+        } finally {
+            setAnimatingIds(prev => {
+                const next = new Set(prev);
+                next.delete(img.id);
+                return next;
+            });
         }
     };
 
@@ -749,9 +795,20 @@ export default function UploadImagesPage() {
                                         <button
                                             onClick={(e) => {
                                                 e.stopPropagation();
+                                                handleAnimateExisting(img);
+                                            }}
+                                            disabled={animatingIds.has(img.id)}
+                                            className="text-xs bg-purple-500/20 hover:bg-purple-500/40 text-purple-200 hover:text-white px-2 py-1 rounded backdrop-blur-sm transition-colors border border-purple-500/20 flex items-center gap-1 disabled:opacity-50"
+                                        >
+                                            {animatingIds.has(img.id) ? <Loader2 className="w-3 h-3 animate-spin" /> : <Video className="w-3 h-3" />}
+                                            Animate
+                                        </button>
+                                        <button
+                                            onClick={(e) => {
+                                                e.stopPropagation();
                                                 setMoveModalState({ isOpen: true, itemId: img.id });
                                             }}
-                                            className="text-xs bg-white/20 hover:bg-white/40 text-white px-2 py-1 rounded backdrop-blur-sm transition-colors"
+                                            className="text-xs bg-white/20 hover:bg-white/40 text-white px-2 py-1 rounded backdrop-blur-sm transition-colors ml-1"
                                         >
                                             Move
                                         </button>
@@ -760,7 +817,7 @@ export default function UploadImagesPage() {
                                                 e.stopPropagation();
                                                 handleDelete(img.id);
                                             }}
-                                            className="text-xs bg-red-500/20 hover:bg-red-500/40 text-red-200 hover:text-white px-2 py-1 rounded backdrop-blur-sm transition-colors ml-2 border border-red-500/20"
+                                            className="text-xs bg-red-500/20 hover:bg-red-500/40 text-red-200 hover:text-white px-2 py-1 rounded backdrop-blur-sm transition-colors ml-1 border border-red-500/20"
                                         >
                                             Delete
                                         </button>
