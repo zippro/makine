@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Video, History, Image, Music, FolderOpen, Home, Clapperboard, ChevronDown, Check, ListTodo, LogOut, User, Upload, Bot, HardDrive } from "lucide-react";
+import { Video, History, Image, Music, FolderOpen, Home, Clapperboard, ChevronDown, Check, ListTodo, LogOut, User, Upload, Bot, HardDrive, Sparkles } from "lucide-react";
 import { useProject } from "@/context/ProjectContext";
 import { createClient } from "@/lib/supabase/client";
 import AISettingsModal from "@/components/AISettingsModal";
@@ -146,6 +146,17 @@ export default function Navigation() {
                         >
                             <ListTodo className="h-4 w-4" />
                             <span className="hidden md:inline">Todos</span>
+                        </Link>
+
+                        <Link
+                            href="/creator/image"
+                            className={`flex items-center gap-1.5 rounded-lg px-2 sm:px-3 py-2 text-sm transition-colors ${pathname?.startsWith("/creator")
+                                ? "bg-purple-500/10 text-purple-400 font-medium"
+                                : "text-muted hover:text-purple-400 hover:bg-card"
+                                }`}
+                        >
+                            <Sparkles className="h-4 w-4" />
+                            <span className="hidden lg:inline">Creator</span>
                         </Link>
 
                         <div className="h-4 w-px bg-border mx-1" />
