@@ -1,6 +1,7 @@
 "use client";
 
-import React, { createContext, useContext, useState, useCallback } from "react";
+import React, { createContext, useContext, useState, useCallback, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { X, ExternalLink, CheckCircle, AlertCircle, Youtube, Minimize2, Upload } from "lucide-react";
 
 // ─── Config ──────────────────────────────────────────────────────────────────
@@ -275,28 +276,49 @@ export function UploadQueueProvider({ children }: { children: React.ReactNode })
         return uploads.some(u => u.jobId === jobId && u.status === "uploading");
     }, [uploads]);
 
+    // Portal mount — render toast directly on document.body to bypass CSS transform issues
+    const [portalRoot, setPortalRoot] = useState<HTMLElement | null>(null);
+    useEffect(() => {
+        setPortalRoot(document.body);
+    }, []);
+
+    const toastPanel = uploads.length > 0 ? (
+        <div
+            style={{
+                position: 'fixed',
+                bottom: '24px',
+                right: '24px',
+                zIndex: 9999,
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '12px',
+                maxWidth: '420px',
+                width: '100%',
+                pointerEvents: 'auto',
+            }}
+        >
+            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                <button onClick={() => setMinimized(!minimized)} className="p-1.5 bg-card border border-border rounded-lg text-muted hover:text-foreground transition-colors shadow-lg">
+                    {minimized ? (
+                        <div className="flex items-center gap-1.5 px-1">
+                            <Youtube className="w-3.5 h-3.5 text-red-500" />
+                            <span className="text-xs font-medium">{uploads.filter(u => u.status === "uploading").length} uploading</span>
+                        </div>
+                    ) : (
+                        <Minimize2 className="w-3.5 h-3.5" />
+                    )}
+                </button>
+            </div>
+            {!minimized && uploads.map(task => (
+                <UploadToast key={task.id} task={task} onRetry={() => retryUpload(task.id)} onDismiss={() => dismissUpload(task.id)} />
+            ))}
+        </div>
+    ) : null;
+
     return (
         <UploadQueueContext.Provider value={{ uploads, addUpload, retryUpload, dismissUpload, isUploading }}>
             {children}
-            {uploads.length > 0 && (
-                <div className="fixed bottom-6 right-6 z-[60] flex flex-col gap-3 max-w-md w-full">
-                    <div className="flex justify-end">
-                        <button onClick={() => setMinimized(!minimized)} className="p-1.5 bg-card border border-border rounded-lg text-muted hover:text-foreground transition-colors shadow-lg">
-                            {minimized ? (
-                                <div className="flex items-center gap-1.5 px-1">
-                                    <Youtube className="w-3.5 h-3.5 text-red-500" />
-                                    <span className="text-xs font-medium">{uploads.filter(u => u.status === "uploading").length} uploading</span>
-                                </div>
-                            ) : (
-                                <Minimize2 className="w-3.5 h-3.5" />
-                            )}
-                        </button>
-                    </div>
-                    {!minimized && uploads.map(task => (
-                        <UploadToast key={task.id} task={task} onRetry={() => retryUpload(task.id)} onDismiss={() => dismissUpload(task.id)} />
-                    ))}
-                </div>
-            )}
+            {portalRoot && toastPanel && createPortal(toastPanel, portalRoot)}
         </UploadQueueContext.Provider>
     );
 }
