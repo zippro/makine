@@ -55,10 +55,85 @@ function getApiKey(): string {
     return key;
 }
 
-async function falRequest(model: string, input: Record<string, any>): Promise<any> {
+/**
+ * Submit a request to fal.ai queue — returns request_id for polling
+ */
+export async function submitToFal(model: string, input: Record<string, any>): Promise<{ requestId: string }> {
     const key = getApiKey();
 
-    // Submit to queue
+    console.log(`[fal.ai] Submitting to ${model}...`);
+    const res = await fetch(`${FAL_API_BASE}/${model}`, {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Key ${key}`,
+        },
+        body: JSON.stringify(input),
+    });
+
+    if (!res.ok) {
+        const errText = await res.text();
+        console.error(`[fal.ai] Submit failed (${res.status}):`, errText);
+        throw new Error(`fal.ai error (${res.status}): ${errText}`);
+    }
+
+    const data = await res.json();
+
+    // If synchronous result, wrap it
+    if (data.images) {
+        return { requestId: "__SYNC__" };
+    }
+
+    console.log(`[fal.ai] Queued: ${data.request_id}`);
+    return { requestId: data.request_id };
+}
+
+/**
+ * Check the status of a fal.ai request
+ */
+export async function getFalRequestStatus(model: string, requestId: string): Promise<{ status: string; error?: string }> {
+    const key = getApiKey();
+    const url = `${FAL_API_BASE}/${model}/requests/${requestId}/status`;
+
+    const res = await fetch(url, {
+        headers: { "Authorization": `Key ${key}` },
+    });
+
+    if (!res.ok) {
+        const text = await res.text();
+        if (res.status === 400 && text.includes("still in progress")) {
+            return { status: "IN_PROGRESS" };
+        }
+        return { status: "FAILED", error: text };
+    }
+
+    return await res.json();
+}
+
+/**
+ * Get the completed result of a fal.ai request
+ */
+export async function getFalRequestResult(model: string, requestId: string): Promise<FalResult> {
+    const key = getApiKey();
+    const url = `${FAL_API_BASE}/${model}/requests/${requestId}`;
+
+    const res = await fetch(url, {
+        headers: { "Authorization": `Key ${key}` },
+    });
+
+    if (!res.ok) {
+        throw new Error(`Failed to fetch result: ${res.status}`);
+    }
+
+    return await res.json();
+}
+
+/**
+ * Submit + wait for result (with internal polling, max ~55 seconds for Vercel)
+ */
+async function falRequestWithPolling(model: string, input: Record<string, any>): Promise<FalResult> {
+    const key = getApiKey();
+
     console.log(`[fal.ai] Submitting to ${model}...`);
     const submitRes = await fetch(`${FAL_API_BASE}/${model}`, {
         method: "POST",
@@ -77,23 +152,23 @@ async function falRequest(model: string, input: Record<string, any>): Promise<an
 
     const submitData = await submitRes.json();
 
-    // If we got a direct result (synchronous), return it
+    // Synchronous result
     if (submitData.images) {
-        console.log(`[fal.ai] Got synchronous result with ${submitData.images.length} images`);
+        console.log(`[fal.ai] Got sync result`);
         return submitData;
     }
 
-    // Otherwise poll the queue
+    // Poll — max 50 seconds (stay under Vercel's 60s limit)
     const requestId = submitData.request_id;
-    const statusUrl = `${FAL_API_BASE}/${model}/requests/${requestId}/status`;
-    const resultUrl = `${FAL_API_BASE}/${model}/requests/${requestId}`;
+    console.log(`[fal.ai] Queued: ${requestId}, polling (max 50s)...`);
 
-    console.log(`[fal.ai] Queued: ${requestId}, polling...`);
+    const startTime = Date.now();
+    const MAX_WAIT = 50000; // 50 seconds
 
-    // Poll for completion (max 120 seconds)
-    for (let i = 0; i < 60; i++) {
+    while (Date.now() - startTime < MAX_WAIT) {
         await new Promise(r => setTimeout(r, 2000));
 
+        const statusUrl = `${FAL_API_BASE}/${model}/requests/${requestId}/status`;
         const statusRes = await fetch(statusUrl, {
             headers: { "Authorization": `Key ${key}` },
         });
@@ -101,9 +176,8 @@ async function falRequest(model: string, input: Record<string, any>): Promise<an
         if (!statusRes.ok) continue;
         const status = await statusRes.json();
 
-        console.log(`[fal.ai] Poll ${i + 1}: status=${status.status}`);
-
         if (status.status === "COMPLETED") {
+            const resultUrl = `${FAL_API_BASE}/${model}/requests/${requestId}`;
             const resultRes = await fetch(resultUrl, {
                 headers: { "Authorization": `Key ${key}` },
             });
@@ -116,34 +190,13 @@ async function falRequest(model: string, input: Record<string, any>): Promise<an
         }
     }
 
-    throw new Error("Generation timed out after 120 seconds");
-}
-
-// ─── Retry Wrapper ───────────────────────────────────────────────────────────
-
-const MAX_RETRIES = 2;
-
-async function withRetry<T>(fn: () => Promise<T>): Promise<T> {
-    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-        try {
-            return await fn();
-        } catch (err: any) {
-            console.error(`[fal.ai] Attempt ${attempt}/${MAX_RETRIES} failed:`, err.message);
-            if (attempt === MAX_RETRIES) throw err;
-            await new Promise(r => setTimeout(r, 1000 * attempt));
-        }
-    }
-    throw new Error("Unreachable");
+    throw new Error("Generation timed out — please try again");
 }
 
 // ─── Public API ──────────────────────────────────────────────────────────────
 
-/**
- * Generate images from text prompt using Flux 2 Turbo
- * Endpoint: fal-ai/flux-2/turbo
- */
 export async function generateTextToImage(req: TextToImageRequest): Promise<FalResult> {
-    return withRetry(() => falRequest("fal-ai/flux-2/turbo", {
+    return falRequestWithPolling("fal-ai/flux-2/turbo", {
         prompt: req.prompt,
         image_size: req.image_size || "landscape_4_3",
         num_images: req.num_images || 1,
@@ -151,16 +204,11 @@ export async function generateTextToImage(req: TextToImageRequest): Promise<FalR
         ...(req.seed !== undefined ? { seed: req.seed } : {}),
         enable_safety_checker: req.enable_safety_checker ?? true,
         output_format: "png",
-    }));
+    });
 }
 
-/**
- * Generate image variations (edit) using Flux 2 Turbo
- * Endpoint: fal-ai/flux-2/turbo/edit
- * The edit endpoint takes image_urls (array) and a prompt
- */
 export async function generateImageVariation(req: ImageVariationRequest): Promise<FalResult> {
-    return withRetry(() => falRequest("fal-ai/flux-2/turbo/edit", {
+    return falRequestWithPolling("fal-ai/flux-2/turbo/edit", {
         prompt: req.prompt,
         image_urls: [req.imageUrl],
         image_size: req.image_size || "landscape_4_3",
@@ -169,5 +217,5 @@ export async function generateImageVariation(req: ImageVariationRequest): Promis
         ...(req.seed !== undefined ? { seed: req.seed } : {}),
         enable_safety_checker: true,
         output_format: "png",
-    }));
+    });
 }
