@@ -49,47 +49,19 @@ export async function POST(request: NextRequest) {
         const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
         console.log(`[Variations] Generated ${result.images.length} variations in ${elapsed}s`);
 
-        // Download and save
+        // Store fal.ai URLs directly in the DB (skip re-upload to save time)
         const assets = [];
         for (let i = 0; i < result.images.length; i++) {
             const img = result.images[i];
             const timestamp = Date.now();
             const filename = `var_${timestamp}_${i}.png`;
-            const storagePath = `${projectId}/${filename}`;
-
-            // Download from fal.ai
-            const imgRes = await fetch(img.url);
-            if (!imgRes.ok) {
-                console.error(`[Variations] Failed to download image ${i}:`, imgRes.status);
-                continue;
-            }
-            const imgBuffer = await imgRes.arrayBuffer();
-
-            // Upload to Supabase Storage
-            const { error: uploadError } = await supabase.storage
-                .from("images")
-                .upload(storagePath, imgBuffer, {
-                    contentType: img.content_type || "image/png",
-                    upsert: false,
-                });
-
-            if (uploadError) {
-                console.error(`[Variations] Storage upload error:`, uploadError.message);
-                continue;
-            }
-
-            const { data: urlData } = supabase.storage
-                .from("images")
-                .getPublicUrl(storagePath);
-
-            const publicUrl = urlData.publicUrl;
 
             const { data: asset, error: dbError } = await supabase
                 .from("images")
                 .insert({
-                    url: publicUrl,
+                    url: img.url,
                     filename,
-                    file_size: imgBuffer.byteLength,
+                    file_size: 0,
                     width: img.width,
                     height: img.height,
                     project_id: projectId,
