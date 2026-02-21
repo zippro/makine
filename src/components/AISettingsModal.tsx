@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { X, Save, Loader2, Bot, Video, RefreshCw, AlertCircle } from 'lucide-react';
+import { X, Save, Loader2, Bot, Video, RefreshCw, AlertCircle, Image } from 'lucide-react';
 
 interface AISettingsModalProps {
     isOpen: boolean;
@@ -23,6 +23,10 @@ interface AISettings {
     max_poll_attempts: number;
     animation_system_prompt: string;
     animation_user_prompt: string;
+    image_provider: string;
+    image_model: string;
+    image_api_url: string;
+    image_guidance_scale: number;
 }
 
 export default function AISettingsModal({ isOpen, onClose }: AISettingsModalProps) {
@@ -31,7 +35,7 @@ export default function AISettingsModal({ isOpen, onClose }: AISettingsModalProp
     const [isSaving, setIsSaving] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [success, setSuccess] = useState<string | null>(null);
-    const [activeTab, setActiveTab] = useState<'vlm' | 'video' | 'prompts'>('vlm');
+    const [activeTab, setActiveTab] = useState<'vlm' | 'video' | 'image' | 'prompts'>('vlm');
     const [mounted, setMounted] = useState(false);
 
     // Handle client-side mounting for portal
@@ -121,6 +125,7 @@ export default function AISettingsModal({ isOpen, onClose }: AISettingsModalProp
                     {[
                         { id: 'vlm' as const, icon: Bot, label: 'VLM Model' },
                         { id: 'video' as const, icon: Video, label: 'Video Generation' },
+                        { id: 'image' as const, icon: Image, label: 'Image Generation' },
                         { id: 'prompts' as const, icon: RefreshCw, label: 'Prompts' },
                     ].map(tab => (
                         <button
@@ -263,6 +268,71 @@ export default function AISettingsModal({ isOpen, onClose }: AISettingsModalProp
                                             />
                                         </div>
                                     </div>
+                                </div>
+                            )}
+
+                            {/* Image Tab */}
+                            {activeTab === 'image' && (
+                                <div className="space-y-4">
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div>
+                                            <label className="block text-sm font-medium text-white/80 mb-2">Provider</label>
+                                            <select
+                                                value={settings.image_provider || 'fal-flux'}
+                                                onChange={(e) => updateField('image_provider', e.target.value)}
+                                                className="w-full px-4 py-2.5 bg-white/5 border border-white/10 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+                                            >
+                                                <option value="fal-flux">Fal.ai (Flux)</option>
+                                                <option value="fal-sdxl">Fal.ai (SDXL)</option>
+                                                <option value="openai-dalle">OpenAI (DALL·E)</option>
+                                            </select>
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-medium text-white/80 mb-2">Model</label>
+                                            <input
+                                                type="text"
+                                                value={settings.image_model || 'fal-ai/flux-2/turbo'}
+                                                onChange={(e) => updateField('image_model', e.target.value)}
+                                                className="w-full px-4 py-2.5 bg-white/5 border border-white/10 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+                                                placeholder="fal-ai/flux-2/turbo"
+                                            />
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-white/80 mb-2">Image API URL</label>
+                                        <input
+                                            type="text"
+                                            value={settings.image_api_url || 'https://queue.fal.run'}
+                                            onChange={(e) => updateField('image_api_url', e.target.value)}
+                                            className="w-full px-4 py-2.5 bg-white/5 border border-white/10 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-purple-500 font-mono text-sm"
+                                            placeholder="https://queue.fal.run"
+                                        />
+                                    </div>
+                                    <div className="grid grid-cols-2 gap-4">
+                                        <div>
+                                            <label className="block text-sm font-medium text-white/80 mb-2">Guidance Scale</label>
+                                            <input
+                                                type="number"
+                                                step="0.1"
+                                                value={settings.image_guidance_scale || 2.5}
+                                                onChange={(e) => updateField('image_guidance_scale', parseFloat(e.target.value) || 2.5)}
+                                                className="w-full px-4 py-2.5 bg-white/5 border border-white/10 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+                                            />
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-medium text-white/80 mb-2">Edit Model</label>
+                                            <input
+                                                type="text"
+                                                value="fal-ai/flux-2/turbo/edit"
+                                                disabled
+                                                className="w-full px-4 py-2.5 bg-white/5 border border-white/10 rounded-lg text-white/50 font-mono text-sm cursor-not-allowed"
+                                            />
+                                        </div>
+                                    </div>
+                                    <p className="text-sm text-white/50 flex items-start gap-2">
+                                        <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                                        Flux 2 Turbo is used for both text-to-image and image variations. API key is stored in FAL_KEY environment variable.
+                                    </p>
                                 </div>
                             )}
 
