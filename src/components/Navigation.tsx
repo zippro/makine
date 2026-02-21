@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Video, History, Image, Music, FolderOpen, Home, Clapperboard, ChevronDown, Check, ListTodo, LogOut, User, Upload, Bot, HardDrive, Sparkles } from "lucide-react";
+import { Video, History, Image, Music, FolderOpen, Home, Clapperboard, ChevronDown, Check, ListTodo, LogOut, User, Upload, Bot, HardDrive, Sparkles, Package } from "lucide-react";
 import { useProject } from "@/context/ProjectContext";
 import { createClient } from "@/lib/supabase/client";
 import AISettingsModal from "@/components/AISettingsModal";
@@ -13,10 +13,13 @@ export default function Navigation() {
     const router = useRouter();
     const { currentProject, projects, selectProject, isLoading, user } = useProject();
     const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+    const [isProduceOpen, setIsProduceOpen] = useState(false);
     const [nickname, setNickname] = useState<string | null>(null);
     const [mentionCount, setMentionCount] = useState(0);
     const [showAISettings, setShowAISettings] = useState(false);
     const supabase = createClient();
+
+    const isProduceActive = pathname === "/upload-images" || pathname === "/music-library" || pathname === "/animations";
 
     // Fetch user nickname and mention count
     useEffect(() => {
@@ -161,38 +164,64 @@ export default function Navigation() {
 
                         <div className="h-4 w-px bg-border mx-1" />
 
-                        <Link
-                            href="/upload-images"
-                            className={`flex items-center gap-1.5 rounded-lg px-2 sm:px-3 py-2 text-sm transition-colors ${isActive("/upload-images")
-                                ? "bg-primary/10 text-primary font-medium"
-                                : "text-muted hover:text-foreground hover:bg-card"
-                                }`}
-                        >
-                            <Image className="h-4 w-4" />
-                            <span className="hidden lg:inline">Images</span>
-                        </Link>
+                        {/* Produce Dropdown */}
+                        <div className="relative">
+                            <button
+                                onClick={() => setIsProduceOpen(!isProduceOpen)}
+                                className={`flex items-center gap-1.5 rounded-lg px-2 sm:px-3 py-2 text-sm transition-colors ${isProduceActive
+                                    ? "bg-primary/10 text-primary font-medium"
+                                    : "text-muted hover:text-foreground hover:bg-card"
+                                    }`}
+                            >
+                                <Package className="h-4 w-4" />
+                                <span className="hidden lg:inline">Produce</span>
+                                <ChevronDown className={`w-3 h-3 transition-transform ${isProduceOpen ? 'rotate-180' : ''}`} />
+                            </button>
 
-                        <Link
-                            href="/music-library"
-                            className={`flex items-center gap-1.5 rounded-lg px-2 sm:px-3 py-2 text-sm transition-colors ${isActive("/music-library")
-                                ? "bg-primary/10 text-primary font-medium"
-                                : "text-muted hover:text-foreground hover:bg-card"
-                                }`}
-                        >
-                            <Music className="h-4 w-4" />
-                            <span className="hidden lg:inline">Music</span>
-                        </Link>
-
-                        <Link
-                            href="/animations"
-                            className={`flex items-center gap-1.5 rounded-lg px-2 sm:px-3 py-2 text-sm transition-colors ${isActive("/animations")
-                                ? "bg-primary/10 text-primary font-medium"
-                                : "text-muted hover:text-foreground hover:bg-card"
-                                }`}
-                        >
-                            <Video className="h-4 w-4" />
-                            <span className="hidden lg:inline">Anims</span>
-                        </Link>
+                            {isProduceOpen && (
+                                <>
+                                    <div
+                                        className="fixed inset-0 z-40"
+                                        onClick={() => setIsProduceOpen(false)}
+                                    />
+                                    <div className="absolute top-full left-0 mt-1.5 w-44 bg-card border border-border rounded-xl shadow-lg z-50 py-1.5 animate-in fade-in slide-in-from-top-2">
+                                        <Link
+                                            href="/upload-images"
+                                            onClick={() => setIsProduceOpen(false)}
+                                            className={`flex items-center gap-2.5 px-3 py-2 text-sm transition-colors ${isActive("/upload-images")
+                                                ? "bg-primary/10 text-primary font-medium"
+                                                : "text-muted-foreground hover:text-foreground hover:bg-card-hover"
+                                                }`}
+                                        >
+                                            <Image className="h-4 w-4" />
+                                            Images
+                                        </Link>
+                                        <Link
+                                            href="/music-library"
+                                            onClick={() => setIsProduceOpen(false)}
+                                            className={`flex items-center gap-2.5 px-3 py-2 text-sm transition-colors ${isActive("/music-library")
+                                                ? "bg-primary/10 text-primary font-medium"
+                                                : "text-muted-foreground hover:text-foreground hover:bg-card-hover"
+                                                }`}
+                                        >
+                                            <Music className="h-4 w-4" />
+                                            Music
+                                        </Link>
+                                        <Link
+                                            href="/animations"
+                                            onClick={() => setIsProduceOpen(false)}
+                                            className={`flex items-center gap-2.5 px-3 py-2 text-sm transition-colors ${isActive("/animations")
+                                                ? "bg-primary/10 text-primary font-medium"
+                                                : "text-muted-foreground hover:text-foreground hover:bg-card-hover"
+                                                }`}
+                                        >
+                                            <Video className="h-4 w-4" />
+                                            Animations
+                                        </Link>
+                                    </div>
+                                </>
+                            )}
+                        </div>
 
                         <Link
                             href="/history"

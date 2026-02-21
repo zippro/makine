@@ -224,7 +224,8 @@ export default function CreatorImagePage() {
         setError(null);
         setResults([]);
         try {
-            const res = await fetch('/api/creator/image/variations', {
+            // Step 1: Submit to fal.ai queue
+            const submitRes = await fetch('/api/creator/image/variations', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -232,14 +233,60 @@ export default function CreatorImagePage() {
                     folder: selectedFolder,
                     baseImageId: baseImage.id,
                     numImages: varNumImages,
-                    strength: varStrength,
+                    prompt: `Create a variation of this image`,
                     seed: varSeed ? parseInt(varSeed) : undefined,
                     imageSize: varImageSize,
                 }),
             });
-            const data = await res.json();
-            if (!res.ok) throw new Error(data.error || 'Variation failed');
-            setResults(data.assets || []);
+            const submitData = await submitRes.json();
+            if (!submitRes.ok) throw new Error(submitData.error || 'Submit failed');
+
+            const { statusUrl, responseUrl } = submitData;
+
+            // Step 2: Poll for status (client-side, every 2s, max 90s for variations)
+            const startTime = Date.now();
+            const MAX_WAIT = 90000;
+            let completed = false;
+
+            while (Date.now() - startTime < MAX_WAIT) {
+                await new Promise(r => setTimeout(r, 2000));
+
+                const statusRes = await fetch('/api/creator/image/variations', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: 'status', statusUrl }),
+                });
+                const statusData = await statusRes.json();
+
+                if (statusData.status === 'COMPLETED') {
+                    completed = true;
+                    break;
+                }
+                if (statusData.status === 'FAILED') {
+                    throw new Error(statusData.error || 'Generation failed');
+                }
+            }
+
+            if (!completed) throw new Error('Generation timed out — please try again');
+
+            // Step 3: Save result
+            const saveRes = await fetch('/api/creator/image/variations', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    action: 'save',
+                    responseUrl,
+                    projectId: currentProject.id,
+                    folder: selectedFolder,
+                    baseImageId: baseImage.id,
+                    prompt: `Create a variation of this image`,
+                    imageSize: varImageSize,
+                }),
+            });
+            const saveData = await saveRes.json();
+            if (!saveRes.ok) throw new Error(saveData.error || 'Save failed');
+            setResults(saveData.assets || []);
+
         } catch (err: any) {
             setError(err.message);
         } finally {
