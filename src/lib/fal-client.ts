@@ -1,16 +1,9 @@
-import * as fal from "@fal-ai/serverless-client";
-
-// Configure fal.ai with server-side API key
-fal.config({
-    credentials: process.env.FAL_AI_KEY!,
-});
-
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 export interface TextToImageRequest {
     prompt: string;
-    image_size?: string; // e.g "landscape_16_9", "square", "portrait_4_3"
-    num_images?: number; // 1-4
+    image_size?: string;
+    num_images?: number;
     seed?: number;
     enable_safety_checker?: boolean;
 }
@@ -18,8 +11,8 @@ export interface TextToImageRequest {
 export interface ImageVariationRequest {
     imageUrl: string;
     prompt?: string;
-    num_images?: number; // 1-4
-    strength?: number; // 0.0 - 1.0
+    num_images?: number;
+    strength?: number;
     seed?: number;
     image_size?: string;
 }
@@ -48,60 +41,113 @@ export const IMAGE_SIZE_PRESETS: Record<string, { label: string; value: string }
     "portrait_16_9": { label: "Portrait (9:16)", value: "portrait_16_9" },
 };
 
-// ─── API Functions ───────────────────────────────────────────────────────────
+// ─── Direct REST API (no library dependency issues) ──────────────────────────
 
-const MAX_RETRIES = 3;
-const RETRY_DELAY = 1000; // ms
+const FAL_API_BASE = "https://queue.fal.run";
 
-async function withRetry<T>(fn: () => Promise<T>, retries = MAX_RETRIES): Promise<T> {
-    for (let attempt = 1; attempt <= retries; attempt++) {
+function getApiKey(): string {
+    const key = process.env.FAL_AI_KEY;
+    if (!key) throw new Error("FAL_AI_KEY environment variable is not set");
+    return key;
+}
+
+async function falRequest(model: string, input: Record<string, any>): Promise<any> {
+    const key = getApiKey();
+
+    // Submit to queue
+    console.log(`[fal.ai] Submitting to ${model}...`);
+    const submitRes = await fetch(`${FAL_API_BASE}/${model}`, {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Key ${key}`,
+        },
+        body: JSON.stringify(input),
+    });
+
+    if (!submitRes.ok) {
+        const errText = await submitRes.text();
+        console.error(`[fal.ai] Submit failed (${submitRes.status}):`, errText);
+        throw new Error(`fal.ai error (${submitRes.status}): ${errText}`);
+    }
+
+    const submitData = await submitRes.json();
+
+    // If we got a direct result (synchronous), return it
+    if (submitData.images) {
+        return submitData;
+    }
+
+    // Otherwise poll the queue
+    const requestId = submitData.request_id;
+    const statusUrl = submitData.status_url || `https://queue.fal.run/${model}/requests/${requestId}/status`;
+    const resultUrl = submitData.response_url || `https://queue.fal.run/${model}/requests/${requestId}`;
+
+    console.log(`[fal.ai] Queued: ${requestId}, polling...`);
+
+    // Poll for completion (max 120 seconds)
+    for (let i = 0; i < 60; i++) {
+        await new Promise(r => setTimeout(r, 2000));
+
+        const statusRes = await fetch(statusUrl, {
+            headers: { "Authorization": `Key ${key}` },
+        });
+
+        if (!statusRes.ok) continue;
+        const status = await statusRes.json();
+
+        if (status.status === "COMPLETED") {
+            // Fetch result
+            const resultRes = await fetch(resultUrl, {
+                headers: { "Authorization": `Key ${key}` },
+            });
+            if (!resultRes.ok) throw new Error("Failed to fetch result");
+            return await resultRes.json();
+        }
+
+        if (status.status === "FAILED") {
+            throw new Error(`Generation failed: ${status.error || "Unknown error"}`);
+        }
+    }
+
+    throw new Error("Generation timed out after 120 seconds");
+}
+
+// ─── Retry Wrapper ───────────────────────────────────────────────────────────
+
+const MAX_RETRIES = 2;
+
+async function withRetry<T>(fn: () => Promise<T>): Promise<T> {
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
         try {
             return await fn();
         } catch (err: any) {
-            console.error(`[fal.ai] Attempt ${attempt}/${retries} failed:`, err.message);
-            if (attempt === retries) throw err;
-            await new Promise(r => setTimeout(r, RETRY_DELAY * attempt));
+            console.error(`[fal.ai] Attempt ${attempt}/${MAX_RETRIES} failed:`, err.message);
+            if (attempt === MAX_RETRIES) throw err;
+            await new Promise(r => setTimeout(r, 1000 * attempt));
         }
     }
     throw new Error("Unreachable");
 }
 
-/**
- * Generate images from text prompt using Flux2 Fast
- */
-export async function generateTextToImage(req: TextToImageRequest): Promise<FalResult> {
-    return withRetry(async () => {
-        const result = await fal.subscribe("fal-ai/flux/schnell", {
-            input: {
-                prompt: req.prompt,
-                image_size: req.image_size || "landscape_16_9",
-                num_images: req.num_images || 1,
-                ...(req.seed !== undefined ? { seed: req.seed } : {}),
-                enable_safety_checker: req.enable_safety_checker ?? true,
-            },
-            logs: true,
-        });
+// ─── Public API ──────────────────────────────────────────────────────────────
 
-        return result as unknown as FalResult;
-    });
+export async function generateTextToImage(req: TextToImageRequest): Promise<FalResult> {
+    return withRetry(() => falRequest("fal-ai/flux/schnell", {
+        prompt: req.prompt,
+        image_size: req.image_size || "landscape_16_9",
+        num_images: req.num_images || 1,
+        ...(req.seed !== undefined ? { seed: req.seed } : {}),
+        enable_safety_checker: req.enable_safety_checker ?? true,
+    }));
 }
 
-/**
- * Generate variations of an existing image using Flux2 Fast (img2img)
- */
 export async function generateImageVariation(req: ImageVariationRequest): Promise<FalResult> {
-    return withRetry(async () => {
-        const result = await fal.subscribe("fal-ai/flux/schnell/redux", {
-            input: {
-                image_url: req.imageUrl,
-                ...(req.prompt ? { prompt: req.prompt } : {}),
-                image_size: req.image_size || "landscape_16_9",
-                num_images: req.num_images || 1,
-                ...(req.seed !== undefined ? { seed: req.seed } : {}),
-            },
-            logs: true,
-        });
-
-        return result as unknown as FalResult;
-    });
+    return withRetry(() => falRequest("fal-ai/flux/schnell/redux", {
+        image_url: req.imageUrl,
+        ...(req.prompt ? { prompt: req.prompt } : {}),
+        image_size: req.image_size || "landscape_16_9",
+        num_images: req.num_images || 1,
+        ...(req.seed !== undefined ? { seed: req.seed } : {}),
+    }));
 }
