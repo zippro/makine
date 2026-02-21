@@ -13,7 +13,7 @@ export interface UploadTask {
     title: string;
     status: "uploading" | "success" | "error";
     step: UploadStep;
-    progress?: string;   // Human-readable progress e.g. "Downloading 538 MB..."
+    progress?: string;
     youtubeUrl?: string;
     error?: string;
     metadata: {
@@ -47,16 +47,15 @@ export function UploadQueueProvider({ children }: { children: React.ReactNode })
     const [uploads, setUploads] = useState<UploadTask[]>([]);
     const [minimized, setMinimized] = useState(false);
 
-    // Helper to update a single task
     const updateTask = useCallback((taskId: string, updates: Partial<UploadTask>) => {
         setUploads(prev => prev.map(u => u.id === taskId ? { ...u, ...updates } : u));
     }, []);
 
     const executeUpload = useCallback(async (task: UploadTask) => {
         try {
-            // ── Step 1: Get resumable upload URL ──
+            // ── Step 1: Try client-side upload (faster, no server limits) ──
             updateTask(task.id, { step: "init", progress: "Creating upload session..." });
-            console.log("[Upload] Step 1: Creating upload session for job", task.jobId);
+            console.log("[Upload] Step 1: Creating upload session...");
 
             const initRes = await fetch(`/api/jobs/${task.jobId}/publish-init`, {
                 method: "POST",
@@ -67,7 +66,7 @@ export function UploadQueueProvider({ children }: { children: React.ReactNode })
             let initData: any;
             try {
                 const text = await initRes.text();
-                console.log("[Upload] Step 1 response:", initRes.status, text.substring(0, 200));
+                console.log("[Upload] Init response:", initRes.status, text.substring(0, 200));
                 initData = text ? JSON.parse(text) : {};
             } catch {
                 throw new Error("Server error — could not create upload session.");
@@ -82,21 +81,35 @@ export function UploadQueueProvider({ children }: { children: React.ReactNode })
                 throw new Error("Missing upload URL or video URL from server");
             }
 
-            console.log("[Upload] Step 1 complete. Upload URL obtained.");
-            console.log("[Upload] Video source:", videoUrl.substring(0, 80));
+            console.log("[Upload] Session created. Video URL:", videoUrl.substring(0, 80));
 
-            // ── Step 2: Download video in browser ──
+            // ── Step 2: Download video ──
             updateTask(task.id, { step: "downloading", progress: "Downloading video..." });
             console.log("[Upload] Step 2: Downloading video...");
 
-            const videoRes = await fetch(videoUrl);
-            if (!videoRes.ok) {
-                throw new Error(`Failed to download video (HTTP ${videoRes.status}). Is the video server online?`);
+            let videoBlob: Blob;
+            try {
+                // Try direct download first (works if same-origin or CORS-enabled)
+                const videoRes = await fetch(videoUrl);
+                if (!videoRes.ok) {
+                    throw new Error(`HTTP ${videoRes.status}`);
+                }
+                videoBlob = await videoRes.blob();
+            } catch (dlErr: any) {
+                // If direct download fails (CORS), try through our proxy API
+                console.warn("[Upload] Direct download failed:", dlErr.message, "— trying proxy...");
+                updateTask(task.id, { progress: "Downloading via proxy..." });
+
+                const proxyRes = await fetch(`/api/proxy-video?url=${encodeURIComponent(videoUrl)}`);
+                if (!proxyRes.ok) {
+                    const errText = await proxyRes.text();
+                    throw new Error(`Video download failed: ${errText || proxyRes.status}`);
+                }
+                videoBlob = await proxyRes.blob();
             }
 
-            const videoBlob = await videoRes.blob();
             const sizeMB = (videoBlob.size / 1024 / 1024).toFixed(0);
-            console.log(`[Upload] Step 2 complete. Downloaded ${sizeMB} MB`);
+            console.log(`[Upload] Downloaded: ${sizeMB} MB`);
 
             // ── Step 3: Upload to YouTube ──
             updateTask(task.id, { step: "uploading", progress: `Uploading ${sizeMB} MB to YouTube...` });
@@ -104,7 +117,6 @@ export function UploadQueueProvider({ children }: { children: React.ReactNode })
 
             const uploadStartTime = Date.now();
 
-            // Use XMLHttpRequest for upload progress tracking
             const ytResult = await new Promise<{ id: string }>((resolve, reject) => {
                 const xhr = new XMLHttpRequest();
                 xhr.open("PUT", uploadUrl, true);
@@ -114,8 +126,10 @@ export function UploadQueueProvider({ children }: { children: React.ReactNode })
                     if (e.lengthComputable) {
                         const pct = Math.round((e.loaded / e.total) * 100);
                         const uploadedMB = (e.loaded / 1024 / 1024).toFixed(0);
+                        const elapsed = Math.round((Date.now() - uploadStartTime) / 1000);
+                        const speed = e.loaded > 0 ? (e.loaded / elapsed / 1024 / 1024).toFixed(1) : "0";
                         updateTask(task.id, {
-                            progress: `Uploading to YouTube: ${pct}% (${uploadedMB}/${sizeMB} MB)`
+                            progress: `Uploading: ${pct}% (${uploadedMB}/${sizeMB} MB) — ${speed} MB/s`
                         });
                     }
                 };
@@ -123,45 +137,35 @@ export function UploadQueueProvider({ children }: { children: React.ReactNode })
                 xhr.onload = () => {
                     if (xhr.status >= 200 && xhr.status < 300) {
                         try {
-                            const data = JSON.parse(xhr.responseText);
-                            resolve(data);
+                            resolve(JSON.parse(xhr.responseText));
                         } catch {
-                            // YouTube might return non-JSON on success (unlikely but handle it)
-                            console.log("[Upload] YouTube response:", xhr.responseText.substring(0, 200));
+                            console.log("[Upload] YouTube response (non-JSON):", xhr.responseText.substring(0, 200));
                             reject(new Error("YouTube returned invalid response. Check YouTube Studio — the video may have uploaded."));
                         }
                     } else {
                         console.error("[Upload] YouTube error:", xhr.status, xhr.responseText.substring(0, 300));
-                        reject(new Error(`YouTube rejected the upload (${xhr.status}). Try again.`));
+                        reject(new Error(`YouTube rejected upload (${xhr.status}). Try again.`));
                     }
                 };
 
-                xhr.onerror = () => {
-                    console.error("[Upload] XHR network error");
-                    reject(new Error("Network error during YouTube upload. Check your internet connection."));
-                };
-
-                xhr.ontimeout = () => {
-                    reject(new Error("YouTube upload timed out."));
-                };
-
+                xhr.onerror = () => reject(new Error("Network error uploading to YouTube."));
+                xhr.ontimeout = () => reject(new Error("YouTube upload timed out."));
                 xhr.send(videoBlob);
             });
 
-            const elapsed = ((Date.now() - uploadStartTime) / 1000).toFixed(0);
+            const elapsed = Math.round((Date.now() - uploadStartTime) / 1000);
             const youtubeUrl = `https://youtu.be/${ytResult.id}`;
-            console.log(`[Upload] Step 3 complete! Uploaded in ${elapsed}s. URL: ${youtubeUrl}`);
+            console.log(`[Upload] ✅ Done in ${elapsed}s! URL: ${youtubeUrl}`);
 
             updateTask(task.id, {
                 status: "success",
                 step: "done",
                 youtubeUrl,
-                progress: `Published in ${elapsed}s`
+                progress: `Published in ${Math.round(elapsed / 60)}m ${elapsed % 60}s`
             });
 
         } catch (err: any) {
-            console.error("[Upload] FAILED:", err.message);
-            console.error("[Upload] Full error:", err);
+            console.error("[Upload] ❌ FAILED:", err.message);
             updateTask(task.id, {
                 status: "error",
                 step: "error",
@@ -180,7 +184,6 @@ export function UploadQueueProvider({ children }: { children: React.ReactNode })
             progress: "Starting...",
             metadata,
         };
-
         setUploads(prev => [...prev, task]);
         setMinimized(false);
         executeUpload(task);
@@ -190,13 +193,11 @@ export function UploadQueueProvider({ children }: { children: React.ReactNode })
         setUploads(prev => {
             const task = prev.find(u => u.id === taskId);
             if (!task) return prev;
-
             const updated = prev.map(u =>
                 u.id === taskId
                     ? { ...u, status: "uploading" as const, step: "init" as const, error: undefined, progress: "Retrying..." }
                     : u
             );
-
             executeUpload({ ...task, status: "uploading", step: "init", error: undefined, progress: "Retrying..." });
             return updated;
         });
@@ -213,16 +214,12 @@ export function UploadQueueProvider({ children }: { children: React.ReactNode })
     return (
         <UploadQueueContext.Provider value={{ uploads, addUpload, retryUpload, dismissUpload, isUploading }}>
             {children}
-
-            {/* Floating Toast Panel */}
             {uploads.length > 0 && (
                 <div className="fixed bottom-6 right-6 z-[60] flex flex-col gap-3 max-w-md w-full">
-                    {/* Minimize/Expand toggle */}
                     <div className="flex justify-end">
                         <button
                             onClick={() => setMinimized(!minimized)}
                             className="p-1.5 bg-card border border-border rounded-lg text-muted hover:text-foreground transition-colors shadow-lg"
-                            title={minimized ? "Show uploads" : "Minimize"}
                         >
                             {minimized ? (
                                 <div className="flex items-center gap-1.5 px-1">
@@ -234,14 +231,8 @@ export function UploadQueueProvider({ children }: { children: React.ReactNode })
                             )}
                         </button>
                     </div>
-
                     {!minimized && uploads.map(task => (
-                        <UploadToast
-                            key={task.id}
-                            task={task}
-                            onRetry={() => retryUpload(task.id)}
-                            onDismiss={() => dismissUpload(task.id)}
-                        />
+                        <UploadToast key={task.id} task={task} onRetry={() => retryUpload(task.id)} onDismiss={() => dismissUpload(task.id)} />
                     ))}
                 </div>
             )}
@@ -249,28 +240,11 @@ export function UploadQueueProvider({ children }: { children: React.ReactNode })
     );
 }
 
-// ─── Toast Component ─────────────────────────────────────────────────────────
+// ─── Toast ───────────────────────────────────────────────────────────────────
 
-function UploadToast({
-    task,
-    onRetry,
-    onDismiss,
-}: {
-    task: UploadTask;
-    onRetry: () => void;
-    onDismiss: () => void;
-}) {
-    const borderColor =
-        task.status === "uploading" ? "border-blue-500/30" :
-            task.status === "success" ? "border-green-500/30" :
-                "border-red-500/30";
+function UploadToast({ task, onRetry, onDismiss }: { task: UploadTask; onRetry: () => void; onDismiss: () => void }) {
+    const borderColor = task.status === "uploading" ? "border-blue-500/30" : task.status === "success" ? "border-green-500/30" : "border-red-500/30";
 
-    const bgGlow =
-        task.status === "uploading" ? "shadow-blue-500/5" :
-            task.status === "success" ? "shadow-green-500/5" :
-                "shadow-red-500/5";
-
-    // Step icon
     const StepIcon = () => {
         if (task.status === "success") return <CheckCircle className="w-4 h-4 text-green-500" />;
         if (task.status === "error") return <AlertCircle className="w-4 h-4 text-red-500" />;
@@ -280,61 +254,38 @@ function UploadToast({
     };
 
     return (
-        <div className={`bg-card border ${borderColor} rounded-xl p-4 shadow-xl ${bgGlow} animate-in slide-in-from-right-5 fade-in duration-300`}>
+        <div className={`bg-card border ${borderColor} rounded-xl p-4 shadow-xl animate-in slide-in-from-right-5 fade-in duration-300`}>
             <div className="flex items-start gap-3">
-                {/* Icon */}
                 <div className="flex-shrink-0 mt-0.5">
-                    <div className={`w-8 h-8 rounded-full flex items-center justify-center ${task.status === "success" ? "bg-green-500/10" :
-                            task.status === "error" ? "bg-red-500/10" :
-                                "bg-blue-500/10"
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center ${task.status === "success" ? "bg-green-500/10" : task.status === "error" ? "bg-red-500/10" : "bg-blue-500/10"
                         }`}>
                         <StepIcon />
                     </div>
                 </div>
-
-                {/* Content */}
                 <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium truncate">{task.title}</p>
-
                     {task.status === "uploading" && task.progress && (
                         <p className="text-xs text-blue-400 mt-0.5">{task.progress}</p>
                     )}
-
                     {task.status === "success" && (
                         <div className="flex items-center gap-2 mt-1">
                             <span className="text-xs text-green-400">{task.progress || "Published!"}</span>
                             {task.youtubeUrl && (
-                                <a
-                                    href={task.youtubeUrl}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="text-xs text-primary hover:underline flex items-center gap-1"
-                                >
+                                <a href={task.youtubeUrl} target="_blank" rel="noopener noreferrer" className="text-xs text-primary hover:underline flex items-center gap-1">
                                     Open <ExternalLink className="w-3 h-3" />
                                 </a>
                             )}
                         </div>
                     )}
-
                     {task.status === "error" && (
                         <div className="mt-1">
                             <p className="text-xs text-red-400 line-clamp-2">{task.error}</p>
-                            <button
-                                onClick={onRetry}
-                                className="text-xs text-primary hover:underline mt-1"
-                            >
-                                Retry
-                            </button>
+                            <button onClick={onRetry} className="text-xs text-primary hover:underline mt-1">Retry</button>
                         </div>
                     )}
                 </div>
-
-                {/* Dismiss */}
                 {task.status !== "uploading" && (
-                    <button
-                        onClick={onDismiss}
-                        className="flex-shrink-0 p-1 text-muted hover:text-foreground transition-colors"
-                    >
+                    <button onClick={onDismiss} className="flex-shrink-0 p-1 text-muted hover:text-foreground transition-colors">
                         <X className="w-3.5 h-3.5" />
                     </button>
                 )}
