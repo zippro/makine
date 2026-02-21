@@ -21,7 +21,7 @@ export default function Navigation() {
     const supabase = createClient();
 
     const isCreatorActive = pathname?.startsWith("/creator") || pathname === "/upload-images" || pathname === "/music-library";
-    const isDeployActive = pathname === "/create-video" || pathname === "/publish";
+    const isDeployActive = pathname === "/create-video";
 
     // Fetch user nickname and mention count
     useEffect(() => {
@@ -231,12 +231,6 @@ export default function Navigation() {
                                         >
                                             <Clapperboard className="h-4 w-4" /> YouTube Video
                                         </Link>
-                                        <Link href="/publish" onClick={() => setIsDeployOpen(false)}
-                                            className={`flex items-center gap-2.5 px-3 py-2 text-sm transition-colors ${isActive("/publish")
-                                                ? "bg-primary/10 text-primary font-medium" : "text-muted-foreground hover:text-foreground hover:bg-card-hover"}`}
-                                        >
-                                            <Upload className="h-4 w-4" /> Publish
-                                        </Link>
                                     </div>
                                 </>
                             )}
@@ -251,6 +245,17 @@ export default function Navigation() {
                         >
                             <History className="h-4 w-4" />
                             <span className="hidden lg:inline">History</span>
+                        </Link>
+
+                        <Link
+                            href="/publish"
+                            className={`flex items-center gap-1.5 rounded-lg px-2 sm:px-3 py-2 text-sm transition-colors ${isActive("/publish")
+                                ? "bg-primary/10 text-primary font-medium"
+                                : "text-muted hover:text-foreground hover:bg-card"
+                                }`}
+                        >
+                            <Upload className="h-4 w-4" />
+                            <span className="hidden lg:inline">Publish</span>
                         </Link>
 
                         <div className="h-4 w-px bg-border mx-1" />

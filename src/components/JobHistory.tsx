@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Clock, Play, RefreshCw, Trash2, Youtube, Loader2 } from 'lucide-react';
+import { Clock, Play, RefreshCw, Trash2, Youtube, Loader2, Calendar, CheckCircle2 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { JobStatusBadge } from './JobStatus';
 import type { VideoJob } from '@/lib/types';
@@ -299,25 +299,55 @@ export function JobHistory({ limit }: JobHistoryProps) {
                     {/* Actions */}
                     <div className="absolute top-4 right-4 flex items-center gap-2">
                         {job.status === 'done' && (
-                            <button
-                                onClick={(e) => {
-                                    e.preventDefault();
-                                    e.stopPropagation();
-                                    setPublishingJob(job);
-                                }}
-                                className={`p-2 rounded-lg transition-colors disabled:opacity-50 ${isUploading(job.id)
-                                        ? 'bg-blue-500/10 text-blue-500'
-                                        : 'bg-red-600/10 text-red-600 hover:bg-red-600/20'
-                                    }`}
-                                title={isUploading(job.id) ? "Uploading..." : "Publish to YouTube"}
-                                disabled={isUploading(job.id)}
-                            >
-                                {isUploading(job.id) ? (
-                                    <Loader2 className="w-4 h-4 animate-spin" />
-                                ) : (
-                                    <Youtube className="w-4 h-4" />
+                            <>
+                                {/* YouTube Status Icon */}
+                                {job.youtube_status === 'published' && (
+                                    <a
+                                        href={job.youtube_url || '#'}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        onClick={(e) => e.stopPropagation()}
+                                        className="p-2 rounded-lg bg-green-500/10 text-green-500 hover:bg-green-500/20 transition-colors"
+                                        title="Published on YouTube"
+                                    >
+                                        <CheckCircle2 className="w-4 h-4" />
+                                    </a>
                                 )}
-                            </button>
+                                {job.youtube_status === 'scheduled' && (
+                                    <a
+                                        href={job.youtube_url || '#'}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        onClick={(e) => e.stopPropagation()}
+                                        className="p-2 rounded-lg bg-yellow-500/10 text-yellow-500 hover:bg-yellow-500/20 transition-colors"
+                                        title="Scheduled on YouTube"
+                                    >
+                                        <Calendar className="w-4 h-4" />
+                                    </a>
+                                )}
+                                {/* Publish button - show only if not yet published/scheduled */}
+                                {(!job.youtube_status || job.youtube_status === 'none' || job.youtube_status === 'uploaded') && (
+                                    <button
+                                        onClick={(e) => {
+                                            e.preventDefault();
+                                            e.stopPropagation();
+                                            setPublishingJob(job);
+                                        }}
+                                        className={`p-2 rounded-lg transition-colors disabled:opacity-50 ${isUploading(job.id)
+                                            ? 'bg-blue-500/10 text-blue-500'
+                                            : 'bg-red-600/10 text-red-600 hover:bg-red-600/20'
+                                            }`}
+                                        title={isUploading(job.id) ? "Uploading..." : "Publish to YouTube"}
+                                        disabled={isUploading(job.id)}
+                                    >
+                                        {isUploading(job.id) ? (
+                                            <Loader2 className="w-4 h-4 animate-spin" />
+                                        ) : (
+                                            <Youtube className="w-4 h-4" />
+                                        )}
+                                    </button>
+                                )}
+                            </>
                         )}
                         <button
                             onClick={(e) => handleDelete(e, job.id)}

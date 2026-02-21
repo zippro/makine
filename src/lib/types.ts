@@ -89,6 +89,18 @@ export interface VideoJob {
   created_at: string;
   updated_at: string;
   progress?: number; // 0-100
+  youtube_status?: string; // 'none' | 'uploaded' | 'scheduled' | 'published'
+  youtube_url?: string;
+  youtube_video_id?: string;
+  youtube_draft?: {
+    title: string;
+    description: string;
+    tags: string[];
+    privacyStatus: string;
+    publishAt?: string;
+  };
+  youtube_title?: string;
+  youtube_scheduled_at?: string;
 }
 
 export interface CreateJobInput {

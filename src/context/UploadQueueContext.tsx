@@ -3,6 +3,7 @@
 import React, { createContext, useContext, useState, useCallback, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { X, ExternalLink, CheckCircle, AlertCircle, Youtube, Minimize2, Upload } from "lucide-react";
+import { createClient } from "@/lib/supabase/client";
 
 // ─── Config ──────────────────────────────────────────────────────────────────
 
@@ -202,7 +203,19 @@ export function UploadQueueProvider({ children }: { children: React.ReactNode })
                     const min = Math.floor(elapsed / 60);
                     const sec = elapsed % 60;
 
-                    console.log(`[Upload] ✅ Complete! URL: ${youtubeUrl} (${min}m ${sec}s)`);
+                    // Update youtube_status in DB
+                    const supabase = createClient();
+                    const ytStatus = task.metadata.publishAt ? 'scheduled' : 'published';
+                    await supabase
+                        .from('video_jobs')
+                        .update({
+                            youtube_status: ytStatus,
+                            youtube_url: youtubeUrl,
+                            youtube_video_id: ytData.id,
+                        })
+                        .eq('id', task.jobId);
+
+                    console.log(`[Upload] ✅ Complete! URL: ${youtubeUrl} (${min}m ${sec}s), status: ${ytStatus}`);
                     updateTask(task.id, {
                         status: "success",
                         youtubeUrl,

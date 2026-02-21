@@ -2,32 +2,41 @@
 
 import { useState, useEffect } from 'react';
 import { useProject } from '@/context/ProjectContext';
-import { Loader2, Calendar, Youtube, CheckCircle, Clock } from 'lucide-react';
+import { Loader2, Calendar, Youtube, CheckCircle, Clock, ExternalLink } from 'lucide-react';
 import { VideoJob } from '@/lib/types';
 import { format } from 'date-fns';
+import YouTubePublishModal from '@/components/YouTubePublishModal';
 
 export default function PublishPage() {
     const { currentProject } = useProject();
-    const [jobs, setJobs] = useState<any[]>([]);
+    const [jobs, setJobs] = useState<VideoJob[]>([]);
     const [loading, setLoading] = useState(true);
-    const [selectedVideo, setSelectedVideo] = useState<any>(null);
+    const [selectedVideo, setSelectedVideo] = useState<VideoJob | null>(null);
+    const [publishingJob, setPublishingJob] = useState<VideoJob | null>(null);
 
     useEffect(() => {
         if (currentProject) {
             fetch(`/api/jobs?projectId=${currentProject.id}&status=done`)
                 .then(res => res.json())
-                .then(data => {
-                    // Enhance jobs with youtube status (mock for now if not in DB yet)
-                    setJobs(data);
-                })
+                .then(data => setJobs(data))
                 .catch(console.error)
                 .finally(() => setLoading(false));
         }
     }, [currentProject]);
 
+    // Refresh jobs periodically
+    useEffect(() => {
+        if (!currentProject) return;
+        const interval = setInterval(() => {
+            fetch(`/api/jobs?projectId=${currentProject.id}&status=done`)
+                .then(res => res.json())
+                .then(data => setJobs(data))
+                .catch(console.error);
+        }, 5000);
+        return () => clearInterval(interval);
+    }, [currentProject]);
+
     if (loading) return <div className="flex h-screen items-center justify-center"><Loader2 className="animate-spin" /></div>;
-
-
 
     const scheduledJobs = jobs.filter(j => j.youtube_status === 'scheduled');
     const publishedJobs = jobs.filter(j => j.youtube_status === 'published');
@@ -55,7 +64,13 @@ export default function PublishPage() {
                         <div className="space-y-4 bg-muted/10 p-4 rounded-xl min-h-[500px]">
                             {readyJobs.length === 0 && <p className="text-muted text-sm text-center py-10">No videos ready.</p>}
                             {readyJobs.map(job => (
-                                <JobCard key={job.id} job={job} status="ready" onPreview={() => setSelectedVideo(job)} />
+                                <JobCard
+                                    key={job.id}
+                                    job={job}
+                                    status="ready"
+                                    onPreview={() => setSelectedVideo(job)}
+                                    onPublish={() => setPublishingJob(job)}
+                                />
                             ))}
                         </div>
                     </div>
@@ -68,7 +83,13 @@ export default function PublishPage() {
                         <div className="space-y-4 bg-muted/10 p-4 rounded-xl min-h-[500px]">
                             {scheduledJobs.length === 0 && <p className="text-muted text-sm text-center py-10">No videos scheduled.</p>}
                             {scheduledJobs.map(job => (
-                                <JobCard key={job.id} job={job} status="scheduled" onPreview={() => setSelectedVideo(job)} />
+                                <JobCard
+                                    key={job.id}
+                                    job={job}
+                                    status="scheduled"
+                                    onPreview={() => setSelectedVideo(job)}
+                                    onPublish={() => setPublishingJob(job)}
+                                />
                             ))}
                         </div>
                     </div>
@@ -81,7 +102,13 @@ export default function PublishPage() {
                         <div className="space-y-4 bg-muted/10 p-4 rounded-xl min-h-[500px]">
                             {publishedJobs.length === 0 && <p className="text-muted text-sm text-center py-10">No videos published.</p>}
                             {publishedJobs.map(job => (
-                                <JobCard key={job.id} job={job} status="published" onPreview={() => setSelectedVideo(job)} />
+                                <JobCard
+                                    key={job.id}
+                                    job={job}
+                                    status="published"
+                                    onPreview={() => setSelectedVideo(job)}
+                                    onPublish={() => setPublishingJob(job)}
+                                />
                             ))}
                         </div>
                     </div>
@@ -94,7 +121,7 @@ export default function PublishPage() {
                     <div className="bg-card w-full max-w-4xl rounded-2xl overflow-hidden border border-border" onClick={e => e.stopPropagation()}>
                         <div className="aspect-video bg-black relative">
                             <video
-                                src={selectedVideo.video_url || selectedVideo.url} // Handle various possible url fields
+                                src={selectedVideo.video_url || ''}
                                 controls
                                 autoPlay
                                 className="w-full h-full"
@@ -103,30 +130,56 @@ export default function PublishPage() {
                         <div className="p-4 flex justify-between items-center">
                             <div>
                                 <h3 className="font-bold text-lg">{selectedVideo.title_text}</h3>
-                                <p className="text-sm text-muted">Duration: {Math.floor(selectedVideo.duration_seconds / 60)}:{(selectedVideo.duration_seconds % 60).toString().padStart(2, '0')}</p>
+                                <p className="text-sm text-muted">Duration: {selectedVideo.duration_seconds ? `${Math.floor(selectedVideo.duration_seconds / 60)}:${(selectedVideo.duration_seconds % 60).toString().padStart(2, '0')}` : '--:--'}</p>
                             </div>
-                            <button
-                                onClick={() => setSelectedVideo(null)}
-                                className="px-4 py-2 bg-white/10 hover:bg-white/20 rounded-lg text-sm font-medium transition-colors"
-                            >
-                                Close Preview
-                            </button>
+                            <div className="flex gap-2">
+                                {(!selectedVideo.youtube_status || selectedVideo.youtube_status === 'none') && (
+                                    <button
+                                        onClick={() => { setSelectedVideo(null); setPublishingJob(selectedVideo); }}
+                                        className="px-4 py-2 bg-red-600/20 hover:bg-red-600/30 text-red-500 rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
+                                    >
+                                        <Youtube className="w-4 h-4" /> Publish
+                                    </button>
+                                )}
+                                <button
+                                    onClick={() => setSelectedVideo(null)}
+                                    className="px-4 py-2 bg-white/10 hover:bg-white/20 rounded-lg text-sm font-medium transition-colors"
+                                >
+                                    Close
+                                </button>
+                            </div>
                         </div>
                     </div>
                 </div>
+            )}
+
+            {/* YouTube Publish Modal */}
+            {publishingJob && (
+                <YouTubePublishModal
+                    job={publishingJob}
+                    isOpen={!!publishingJob}
+                    onClose={() => setPublishingJob(null)}
+                    channelInfo={currentProject?.channel_info}
+                    keywords={currentProject?.keywords}
+                />
             )}
         </div>
     );
 }
 
-function JobCard({ job, status, onPreview }: { job: any, status: 'ready' | 'scheduled' | 'published', onPreview: () => void }) {
+function JobCard({ job, status, onPreview, onPublish }: {
+    job: VideoJob,
+    status: 'ready' | 'scheduled' | 'published',
+    onPreview: () => void,
+    onPublish: () => void
+}) {
     return (
         <div className="bg-card border border-border rounded-xl p-3 shadow-sm hover:border-primary/50 transition-all group">
             <div className="aspect-video bg-black rounded-lg overflow-hidden relative mb-3 cursor-pointer" onClick={onPreview}>
                 {/* Thumbnail */}
                 {job.thumbnail_url || job.image_url ? (
                     // eslint-disable-next-line @next/next/no-img-element
-                    <img src={job.thumbnail_url || job.image_url} className="w-full h-full object-cover" alt="" />
+                    <img src={job.thumbnail_url || job.image_url || ''} className="w-full h-full object-cover" alt="" />
                 ) : (
                     <div className="flex items-center justify-center h-full text-muted text-xs">No Preview</div>
                 )}
@@ -135,9 +188,11 @@ function JobCard({ job, status, onPreview }: { job: any, status: 'ready' | 'sche
                         <div className="w-0 h-0 border-l-[12px] border-l-white border-y-[8px] border-y-transparent ml-1" />
                     </div>
                 </div>
-                <div className="absolute bottom-1 right-1 bg-black/70 text-white text-[10px] px-1.5 py-0.5 rounded">
-                    {Math.floor(job.duration_seconds / 60)}:{(job.duration_seconds % 60).toString().padStart(2, '0')}
-                </div>
+                {job.duration_seconds && (
+                    <div className="absolute bottom-1 right-1 bg-black/70 text-white text-[10px] px-1.5 py-0.5 rounded">
+                        {Math.floor(job.duration_seconds / 60)}:{(job.duration_seconds % 60).toString().padStart(2, '0')}
+                    </div>
+                )}
             </div>
 
             <h4 className="font-medium text-sm line-clamp-2 mb-1" title={job.title_text}>{job.youtube_title || job.title_text}</h4>
@@ -145,27 +200,56 @@ function JobCard({ job, status, onPreview }: { job: any, status: 'ready' | 'sche
             {status === 'scheduled' && (
                 <div className="text-xs text-yellow-500 flex items-center gap-1 mb-2">
                     <Calendar className="w-3 h-3" />
-                    {job.youtube_scheduled_at ? format(new Date(job.youtube_scheduled_at), 'MMM d, h:mm a') : 'Unscheduled'}
+                    {job.youtube_scheduled_at ? format(new Date(job.youtube_scheduled_at), 'MMM d, h:mm a') : 'Scheduled'}
                 </div>
             )}
             {status === 'published' && (
                 <div className="text-xs text-green-500 flex items-center gap-1 mb-2">
                     <CheckCircle className="w-3 h-3" />
                     Published
+                    {job.youtube_url && (
+                        <a href={job.youtube_url} target="_blank" rel="noopener noreferrer" className="ml-1 hover:text-green-400">
+                            <ExternalLink className="w-3 h-3" />
+                        </a>
+                    )}
                 </div>
             )}
 
-            <div className="flex justify-end gap-2 mt-2 opacity-0 group-hover:opacity-100 transition-opacity">
+            <div className="flex justify-end gap-2 mt-2">
                 <button
                     onClick={(e) => { e.stopPropagation(); onPreview(); }}
                     className="text-xs bg-white/5 hover:bg-white/10 text-foreground px-3 py-1.5 rounded-lg transition-colors border border-border"
                 >
                     Preview
                 </button>
-                <button className="text-xs bg-primary/10 hover:bg-primary/20 text-primary px-3 py-1.5 rounded-lg transition-colors">
-                    {status === 'ready' ? 'Schedule' : 'Edit Details'}
-                </button>
+                {status === 'ready' && (
+                    <button
+                        onClick={(e) => { e.stopPropagation(); onPublish(); }}
+                        className="text-xs bg-red-600/10 hover:bg-red-600/20 text-red-500 px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1"
+                    >
+                        <Youtube className="w-3 h-3" /> Publish / Schedule
+                    </button>
+                )}
+                {status === 'scheduled' && (
+                    <button
+                        onClick={(e) => { e.stopPropagation(); onPublish(); }}
+                        className="text-xs bg-yellow-500/10 hover:bg-yellow-500/20 text-yellow-500 px-3 py-1.5 rounded-lg transition-colors"
+                    >
+                        Edit Schedule
+                    </button>
+                )}
+                {status === 'published' && job.youtube_url && (
+                    <a
+                        href={job.youtube_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                        className="text-xs bg-green-500/10 hover:bg-green-500/20 text-green-500 px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1"
+                    >
+                        <ExternalLink className="w-3 h-3" /> View on YouTube
+                    </a>
+                )}
             </div>
         </div>
-    )
+    );
 }
