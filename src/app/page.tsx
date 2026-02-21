@@ -1,10 +1,11 @@
 'use client';
 
+import { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useProject } from '@/context/ProjectContext';
 import {
   Image, Music, Video, Sparkles, Upload, History, ArrowRight,
-  Clapperboard, CheckCircle2, FolderOpen
+  Clapperboard, CheckCircle2, Youtube, Eye, Film
 } from 'lucide-react';
 
 const WORKFLOW_STEPS = [
@@ -56,39 +57,86 @@ const WORKFLOW_STEPS = [
     href: '/publish',
     color: 'from-green-500 to-emerald-500',
     bgColor: 'bg-green-500/10',
-    items: ['Direct YouTube upload', 'Download MP4', 'Share links'],
+    items: ['Direct YouTube upload', 'Schedule publishing', 'Track status'],
   },
 ];
 
+interface ChannelStats {
+  subscriberCount?: string;
+  videoCount?: string;
+  viewCount?: string;
+  channelTitle?: string;
+  channelThumbnail?: string;
+}
+
 export default function HomePage() {
   const { currentProject } = useProject();
+  const [channelStats, setChannelStats] = useState<ChannelStats | null>(null);
+  const [publishedCount, setPublishedCount] = useState<number>(0);
+
+  // Fetch channel stats and published video count
+  useEffect(() => {
+    if (!currentProject) return;
+
+    // Get published video count from our DB
+    fetch(`/api/jobs?projectId=${currentProject.id}&status=done`)
+      .then(r => r.json())
+      .then(jobs => {
+        const published = jobs.filter((j: any) => j.youtube_status === 'published' || j.youtube_id).length;
+        setPublishedCount(published);
+      })
+      .catch(() => { });
+
+    // Get YouTube channel stats
+    if (currentProject.youtube_creds) {
+      fetch(`/api/channel-stats?projectId=${currentProject.id}`)
+        .then(r => r.ok ? r.json() : null)
+        .then(data => { if (data) setChannelStats(data); })
+        .catch(() => { });
+    }
+  }, [currentProject]);
 
   return (
     <div className="max-w-5xl mx-auto space-y-10">
-      {/* Hero */}
-      <div className="text-center space-y-4 pt-4">
-        <div className="inline-flex items-center gap-2 px-4 py-1.5 bg-purple-500/10 border border-purple-500/20 rounded-full text-sm text-purple-400">
-          <Sparkles className="w-4 h-4" />
-          AI-Powered Video Creation
-        </div>
+      {/* Project Header */}
+      <div className="text-center space-y-5 pt-4">
         <h1 className="text-4xl md:text-5xl font-bold">
-          <span className="gradient-text">Create Music Videos</span>
-          <br />
-          <span className="text-foreground/80">in 5 Simple Steps</span>
+          <span className="gradient-text">{currentProject?.name || 'Makine'}</span>
         </h1>
-        <p className="text-muted max-w-2xl mx-auto text-lg">
-          Transform your images into stunning AI-animated music videos.
-          Upload, generate, compose, and publish — all in one place.
-        </p>
-      </div>
 
-      {/* Current Project */}
-      {currentProject && (
-        <div className="flex items-center justify-center gap-2 text-sm text-muted">
-          <FolderOpen className="w-4 h-4" />
-          Working on: <span className="text-primary font-medium">{currentProject.name}</span>
-        </div>
-      )}
+        {/* Channel Stats */}
+        {(channelStats || publishedCount > 0) && (
+          <div className="flex items-center justify-center gap-6 flex-wrap">
+            {channelStats?.viewCount && (
+              <div className="flex items-center gap-2 px-4 py-2 bg-card border border-border rounded-xl">
+                <Eye className="w-4 h-4 text-blue-400" />
+                <div className="text-left">
+                  <p className="text-sm font-bold">{Number(channelStats.viewCount).toLocaleString()}</p>
+                  <p className="text-[10px] text-muted">Total Views</p>
+                </div>
+              </div>
+            )}
+            {channelStats?.subscriberCount && (
+              <div className="flex items-center gap-2 px-4 py-2 bg-card border border-border rounded-xl">
+                <Youtube className="w-4 h-4 text-red-500" />
+                <div className="text-left">
+                  <p className="text-sm font-bold">{Number(channelStats.subscriberCount).toLocaleString()}</p>
+                  <p className="text-[10px] text-muted">Subscribers</p>
+                </div>
+              </div>
+            )}
+            {(publishedCount > 0 || channelStats?.videoCount) && (
+              <div className="flex items-center gap-2 px-4 py-2 bg-card border border-border rounded-xl">
+                <Film className="w-4 h-4 text-green-400" />
+                <div className="text-left">
+                  <p className="text-sm font-bold">{channelStats?.videoCount || publishedCount}</p>
+                  <p className="text-[10px] text-muted">Videos Published</p>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
 
       {/* Workflow Steps */}
       <div className="space-y-4">
