@@ -59,61 +59,106 @@ export function UploadQueueProvider({ children }: { children: React.ReactNode })
      */
     const executeUpload = useCallback(async (task: UploadTask) => {
         const startTime = Date.now();
-        const controller = new AbortController();
-        activeUploads.current.set(task.id, controller);
 
         try {
             updateTask(task.id, {
-                progress: "Sending to YouTube (server-side)...",
-                percent: 10
+                progress: "Uploading to YouTube (server-side)...",
+                percent: 15
             });
 
             console.log(`[Upload] Starting server-side publish for job: ${task.jobId}`);
 
-            // Call server-side publish endpoint
-            // The server streams the video directly from storage to YouTube
-            const res = await fetch(`/api/jobs/${task.jobId}/publish`, {
+            // Fire the server-side publish request
+            // Don't await entirely — the server streams directly from storage to YouTube
+            // Server sets youtube_status = 'uploading' immediately
+            fetch(`/api/jobs/${task.jobId}/publish`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(task.metadata),
-                signal: controller.signal,
+            }).then(async (res) => {
+                // If we get a response before polling catches it, update directly
+                try {
+                    const data = await res.json();
+                    if (res.ok && data.youtubeId) {
+                        const elapsed = Math.round((Date.now() - startTime) / 1000);
+                        const min = Math.floor(elapsed / 60);
+                        const sec = elapsed % 60;
+                        const statusLabel = data.status === 'scheduled' ? 'Scheduled' : 'Published';
+                        console.log(`[Upload] ✅ ${statusLabel}! URL: ${data.url} (${min}m ${sec}s)`);
+                        updateTask(task.id, {
+                            status: "success",
+                            youtubeUrl: data.url,
+                            progress: `${statusLabel} in ${min}m ${sec}s`,
+                            percent: 100,
+                        });
+                    }
+                } catch {
+                    // Response may be empty (timeout) — polling will handle it
+                    console.log("[Upload] Fetch response not parseable, polling will handle status");
+                }
+            }).catch((err) => {
+                // Network error or timeout — polling will detect the outcome
+                console.log("[Upload] Fetch error (polling will detect outcome):", err.message);
             });
 
-            const data = await res.json();
+            // Poll DB for youtube_status changes every 5 seconds
+            let attempts = 0;
+            const maxAttempts = 120; // 10 minutes max polling
+            const pollInterval = 5000;
 
-            if (!res.ok) {
-                throw new Error(data.error || `Server error (${res.status})`);
+            const { createClient } = await import("@/lib/supabase/client");
+
+            while (attempts < maxAttempts) {
+                await new Promise(resolve => setTimeout(resolve, pollInterval));
+                attempts++;
+
+                const elapsed = Math.round((Date.now() - startTime) / 1000);
+                const min = Math.floor(elapsed / 60);
+                const sec = elapsed % 60;
+
+                // Update progress message
+                updateTask(task.id, {
+                    progress: `Server uploading to YouTube... (${min}m ${sec}s)`,
+                    percent: Math.min(15 + Math.round((attempts / maxAttempts) * 80), 95),
+                });
+
+                // Check DB for status change
+                const supabase = createClient();
+                const { data: job } = await supabase
+                    .from("video_jobs")
+                    .select("youtube_status, youtube_id")
+                    .eq("id", task.jobId)
+                    .single();
+
+                if (!job) continue;
+
+                if (job.youtube_status === 'published' || job.youtube_status === 'scheduled') {
+                    const ytUrl = job.youtube_id ? `https://youtu.be/${job.youtube_id}` : undefined;
+                    const statusLabel = job.youtube_status === 'scheduled' ? 'Scheduled' : 'Published';
+                    console.log(`[Upload] ✅ ${statusLabel} (detected via poll)! ${ytUrl}`);
+                    updateTask(task.id, {
+                        status: "success",
+                        youtubeUrl: ytUrl,
+                        progress: `${statusLabel} in ${min}m ${sec}s`,
+                        percent: 100,
+                    });
+                    return;
+                }
+
+                if (job.youtube_status === 'none' && attempts > 3) {
+                    // Status was reset to 'none' by server = failure
+                    throw new Error("Upload failed on server. Check Vercel logs for details.");
+                }
             }
 
-            const elapsed = Math.round((Date.now() - startTime) / 1000);
-            const min = Math.floor(elapsed / 60);
-            const sec = elapsed % 60;
-            const statusLabel = data.status === 'scheduled' ? 'Scheduled' : 'Published';
-
-            console.log(`[Upload] ✅ ${statusLabel}! URL: ${data.url} (${min}m ${sec}s)`);
-            updateTask(task.id, {
-                status: "success",
-                youtubeUrl: data.url,
-                progress: `${statusLabel} in ${min}m ${sec}s`,
-                percent: 100,
-            });
+            throw new Error("Upload timed out (10 min). Check YouTube Studio — the video may still be processing.");
 
         } catch (err: any) {
-            if (err.name === 'AbortError') {
-                console.log(`[Upload] Cancelled: ${task.jobId}`);
-                updateTask(task.id, {
-                    status: "error",
-                    error: "Upload cancelled",
-                });
-            } else {
-                console.error("[Upload] ❌ FAILED:", err.message);
-                updateTask(task.id, {
-                    status: "error",
-                    error: err.message || "Upload failed",
-                });
-            }
-        } finally {
-            activeUploads.current.delete(task.id);
+            console.error("[Upload] ❌ FAILED:", err.message);
+            updateTask(task.id, {
+                status: "error",
+                error: err.message || "Upload failed",
+            });
         }
     }, [updateTask]);
 
