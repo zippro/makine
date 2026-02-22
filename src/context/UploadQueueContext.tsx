@@ -1,13 +1,9 @@
 "use client";
 
-import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from "react";
+import React, { createContext, useContext, useState, useCallback, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { X, ExternalLink, CheckCircle, AlertCircle, Youtube, Minimize2, Loader2 } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
-
-// ─── Config ──────────────────────────────────────────────────────────────────
-
-const CHUNK_SIZE = 50 * 1024 * 1024; // 50 MB per chunk
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -55,159 +51,122 @@ export function UploadQueueProvider({ children }: { children: React.ReactNode })
         setUploads(prev => prev.map(u => u.id === taskId ? { ...u, ...updates } : u));
     }, []);
 
+    /**
+     * Upload flow:
+     * 1. Client calls Vercel /api/jobs/[id]/publish → Vercel triggers VPS (returns immediately)
+     * 2. VPS reads video from local disk → streams to YouTube (no timeout)
+     * 3. Client polls VPS /youtube-status/:jobId for real-time progress
+     * 4. Client polls DB for final youtube_status (published/scheduled)
+     */
     const executeUpload = useCallback(async (task: UploadTask) => {
         const startTime = Date.now();
 
         try {
-            // ── Step 1: Get access token + video info from server ──
-            updateTask(task.id, { progress: "Getting credentials...", percent: 0 });
-            console.log("[Upload] Step 1: Getting access token for job:", task.jobId);
+            // ── Step 1: Trigger upload via Vercel API (which tells the VPS) ──
+            updateTask(task.id, { progress: "Starting upload on server...", percent: 5 });
+            console.log(`[Upload] Triggering VPS upload for job: ${task.jobId}`);
 
-            const initRes = await fetch(`/api/jobs/${task.jobId}/publish-init`, {
+            const triggerRes = await fetch(`/api/jobs/${task.jobId}/publish`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(task.metadata),
             });
 
-            const initText = await initRes.text();
-            console.log("[Upload] Init response:", initRes.status, initText.substring(0, 200));
-
-            if (!initRes.ok) {
-                const err = initText ? JSON.parse(initText) : {};
-                throw new Error(err.error || `Server error (${initRes.status})`);
+            if (!triggerRes.ok) {
+                const errData = await triggerRes.json().catch(() => ({}));
+                throw new Error(errData.error || `Failed to start upload (${triggerRes.status})`);
             }
 
-            const { accessToken, videoUrl, fileSize } = JSON.parse(initText);
+            console.log("[Upload] VPS upload triggered, starting to poll for progress...");
 
-            // ── Step 2: Create resumable upload session ──
-            updateTask(task.id, { progress: "Creating upload session...", percent: 5 });
-            console.log("[Upload] Step 2: Creating resumable upload session");
+            // ── Step 2: Poll VPS for real-time progress + DB for final status ──
+            let attempts = 0;
+            const maxAttempts = 240; // 20 minutes max (5s intervals)
+            const pollInterval = 5000;
+            let lastVpsMessage = "";
 
-            const snippet: any = {
-                title: task.metadata.title.substring(0, 100),
-                description: task.metadata.description,
-                tags: task.metadata.tags,
-                categoryId: "22",
-            };
-            const statusObj: any = {
-                privacyStatus: task.metadata.privacyStatus,
-                selfDeclaredMadeForKids: false,
-            };
-            if (task.metadata.publishAt) {
-                statusObj.publishAt = task.metadata.publishAt;
-            }
+            while (attempts < maxAttempts) {
+                await new Promise(resolve => setTimeout(resolve, pollInterval));
+                attempts++;
 
-            const sessionRes = await fetch(
-                "https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status",
-                {
-                    method: "POST",
-                    headers: {
-                        Authorization: `Bearer ${accessToken}`,
-                        "Content-Type": "application/json; charset=UTF-8",
-                        "X-Upload-Content-Length": String(fileSize),
-                        "X-Upload-Content-Type": "video/mp4",
-                    },
-                    body: JSON.stringify({ snippet, status: statusObj }),
+                const elapsed = Math.round((Date.now() - startTime) / 1000);
+                const min = Math.floor(elapsed / 60);
+                const sec = elapsed % 60;
+
+                // Poll VPS for real-time progress via Vercel proxy
+                try {
+                    const statusRes = await fetch(`/api/jobs/${task.jobId}/publish-status`);
+                    if (statusRes.ok) {
+                        const vpsStatus = await statusRes.json();
+
+                        if (vpsStatus.status === 'uploading' && vpsStatus.message) {
+                            lastVpsMessage = vpsStatus.message;
+                            updateTask(task.id, {
+                                progress: `${vpsStatus.message} (${min}m ${sec}s)`,
+                                percent: Math.max(vpsStatus.percent || 10, 10),
+                            });
+                            continue;
+                        }
+
+                        if (vpsStatus.status === 'success') {
+                            const statusLabel = task.metadata.publishAt ? 'Scheduled' : 'Published';
+                            console.log(`[Upload] ✅ ${statusLabel} via VPS! ${vpsStatus.url}`);
+                            updateTask(task.id, {
+                                status: "success",
+                                youtubeUrl: vpsStatus.url,
+                                progress: `${statusLabel} in ${min}m ${sec}s`,
+                                percent: 100,
+                            });
+                            return;
+                        }
+
+                        if (vpsStatus.status === 'error') {
+                            throw new Error(vpsStatus.message || "Upload failed on server");
+                        }
+                    }
+                } catch (pollErr: any) {
+                    // VPS polling failed — fall back to DB polling
+                    if (pollErr.message && !pollErr.message.includes('fetch')) {
+                        throw pollErr; // Re-throw actual upload errors
+                    }
+                    console.log("[Upload] VPS poll failed, checking DB...");
                 }
-            );
 
-            if (!sessionRes.ok) {
-                const errText = await sessionRes.text();
-                console.error("[Upload] Session creation failed:", errText);
-                throw new Error(`YouTube session error (${sessionRes.status}): ${errText.substring(0, 200)}`);
-            }
+                // Fallback: check DB for final status
+                const supabase = createClient();
+                const { data: job } = await supabase
+                    .from("video_jobs")
+                    .select("youtube_status, youtube_id")
+                    .eq("id", task.jobId)
+                    .single();
 
-            const uploadUri = sessionRes.headers.get("location");
-            if (!uploadUri) throw new Error("No upload URI returned by YouTube");
-            console.log("[Upload] Upload URI obtained");
-
-            // ── Step 3: Download video and upload in chunks ──
-            updateTask(task.id, { progress: "Downloading video...", percent: 8 });
-            console.log("[Upload] Step 3: Downloading video from:", videoUrl.substring(0, 60));
-
-            const videoRes = await fetch(videoUrl);
-            if (!videoRes.ok) throw new Error(`Failed to download video (${videoRes.status})`);
-
-            const videoBlob = await videoRes.blob();
-            const totalChunks = Math.ceil(videoBlob.size / CHUNK_SIZE);
-            console.log(`[Upload] Video downloaded: ${(videoBlob.size / 1024 / 1024).toFixed(1)} MB, ${totalChunks} chunks`);
-
-            let offset = 0;
-            let chunkIndex = 0;
-
-            while (offset < videoBlob.size) {
-                const end = Math.min(offset + CHUNK_SIZE, videoBlob.size);
-                const chunk = videoBlob.slice(offset, end);
-                const pct = Math.round((offset / videoBlob.size) * 85) + 10;
-
-                updateTask(task.id, {
-                    progress: `Uploading chunk ${chunkIndex + 1}/${totalChunks} (${pct}%)`,
-                    percent: pct,
-                });
-
-                console.log(`[Upload] Chunk ${chunkIndex + 1}/${totalChunks}: bytes ${offset}-${end - 1}/${videoBlob.size}`);
-
-                const uploadRes = await fetch(uploadUri, {
-                    method: "PUT",
-                    headers: {
-                        "Content-Range": `bytes ${offset}-${end - 1}/${videoBlob.size}`,
-                        "Content-Type": "video/mp4",
-                    },
-                    body: chunk,
-                });
-
-                if (uploadRes.status === 200 || uploadRes.status === 201) {
-                    // Upload complete!
-                    const ytData = await uploadRes.json();
-                    const youtubeUrl = `https://youtu.be/${ytData.id}`;
-                    const elapsed = Math.round((Date.now() - startTime) / 1000);
-                    const min = Math.floor(elapsed / 60);
-                    const sec = elapsed % 60;
-
-                    // Update youtube_status in DB
-                    const supabase = createClient();
-                    const ytStatus = task.metadata.publishAt ? 'scheduled' : 'published';
-                    const updateData: any = {
-                        youtube_status: ytStatus,
-                        youtube_id: ytData.id,
-                    };
-                    if (task.metadata.publishAt) {
-                        updateData.youtube_scheduled_at = task.metadata.publishAt;
-                    }
-                    const { error: dbError } = await supabase
-                        .from('video_jobs')
-                        .update(updateData)
-                        .eq('id', task.jobId);
-
-                    if (dbError) {
-                        console.error('[Upload] DB update error:', dbError);
-                    }
-
-                    const statusLabel = ytStatus === 'scheduled' ? 'Scheduled' : 'Published';
-                    console.log(`[Upload] ✅ ${statusLabel}! URL: ${youtubeUrl} (${min}m ${sec}s)`);
+                if (job?.youtube_status === 'published' || job?.youtube_status === 'scheduled') {
+                    const ytUrl = job.youtube_id ? `https://youtu.be/${job.youtube_id}` : undefined;
+                    const statusLabel = job.youtube_status === 'scheduled' ? 'Scheduled' : 'Published';
+                    console.log(`[Upload] ✅ ${statusLabel} (via DB poll)! ${ytUrl}`);
                     updateTask(task.id, {
                         status: "success",
-                        youtubeUrl,
+                        youtubeUrl: ytUrl,
                         progress: `${statusLabel} in ${min}m ${sec}s`,
                         percent: 100,
                     });
                     return;
-                } else if (uploadRes.status === 308) {
-                    // Chunk accepted, more to go
-                    const range = uploadRes.headers.get("range");
-                    console.log(`[Upload] Chunk ${chunkIndex + 1} accepted. Server range: ${range}`);
-                } else {
-                    const errText = await uploadRes.text();
-                    console.error(`[Upload] Unexpected response ${uploadRes.status}:`, errText);
-                    throw new Error(`Upload error (${uploadRes.status}): ${errText.substring(0, 200)}`);
                 }
 
-                offset = end;
-                chunkIndex++;
+                if (job?.youtube_status === 'none' && attempts > 6) {
+                    throw new Error("Upload failed on server. Check VPS logs.");
+                }
+
+                // Update progress if no VPS message
+                if (!lastVpsMessage) {
+                    updateTask(task.id, {
+                        progress: `Server uploading to YouTube... (${min}m ${sec}s)`,
+                        percent: Math.min(10 + Math.round((attempts / maxAttempts) * 85), 95),
+                    });
+                }
             }
 
-            // If we exit the loop without success, something went wrong
-            throw new Error("Upload completed all chunks but YouTube didn't confirm. Check YouTube Studio.");
+            throw new Error("Upload timed out (20 min). Check YouTube Studio — the video may still be processing.");
 
         } catch (err: any) {
             console.error("[Upload] ❌ FAILED:", err.message);
@@ -253,11 +212,10 @@ export function UploadQueueProvider({ children }: { children: React.ReactNode })
         return uploads.some(u => u.jobId === jobId && u.status === "uploading");
     }, [uploads]);
 
-    // Warn before closing tab if uploads are active
+    // Warn before closing tab
     useEffect(() => {
         const hasActive = uploads.some(u => u.status === "uploading");
         if (!hasActive) return;
-
         const handler = (e: BeforeUnloadEvent) => {
             e.preventDefault();
             e.returnValue = "YouTube uploads are in progress. Are you sure you want to leave?";
@@ -266,25 +224,16 @@ export function UploadQueueProvider({ children }: { children: React.ReactNode })
         return () => window.removeEventListener("beforeunload", handler);
     }, [uploads]);
 
-    // Portal mount — render toast directly on document.body
+    // Portal mount
     const [portalRoot, setPortalRoot] = useState<HTMLElement | null>(null);
-    useEffect(() => {
-        setPortalRoot(document.body);
-    }, []);
+    useEffect(() => { setPortalRoot(document.body); }, []);
 
     const toastPanel = uploads.length > 0 ? (
         <div
             style={{
-                position: 'fixed',
-                bottom: '24px',
-                right: '24px',
-                zIndex: 9999,
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '12px',
-                maxWidth: '420px',
-                width: '100%',
-                pointerEvents: 'auto',
+                position: 'fixed', bottom: '24px', right: '24px', zIndex: 9999,
+                display: 'flex', flexDirection: 'column', gap: '12px',
+                maxWidth: '420px', width: '100%', pointerEvents: 'auto',
             }}
         >
             <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
@@ -322,8 +271,7 @@ function UploadToast({ task, onRetry, onDismiss }: { task: UploadTask; onRetry: 
         <div className={`bg-card border ${borderColor} rounded-xl p-4 shadow-xl animate-in slide-in-from-right-5 fade-in duration-300`}>
             <div className="flex items-start gap-3">
                 <div className="flex-shrink-0 mt-0.5">
-                    <div className={`w-8 h-8 rounded-full flex items-center justify-center ${task.status === "success" ? "bg-green-500/10" : task.status === "error" ? "bg-red-500/10" : "bg-blue-500/10"
-                        }`}>
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center ${task.status === "success" ? "bg-green-500/10" : task.status === "error" ? "bg-red-500/10" : "bg-blue-500/10"}`}>
                         {task.status === "success" && <CheckCircle className="w-4 h-4 text-green-500" />}
                         {task.status === "error" && <AlertCircle className="w-4 h-4 text-red-500" />}
                         {task.status === "uploading" && <Loader2 className="w-4 h-4 text-blue-500 animate-spin" />}
@@ -337,6 +285,7 @@ function UploadToast({ task, onRetry, onDismiss }: { task: UploadTask; onRetry: 
                                 <div className="bg-blue-500 h-1.5 rounded-full transition-all duration-500" style={{ width: `${task.percent || 0}%` }} />
                             </div>
                             <p className="text-xs text-blue-400">{task.progress}</p>
+                            <p className="text-[10px] text-muted mt-0.5">Server uploading directly — you can navigate freely</p>
                         </div>
                     )}
                     {task.status === "success" && (
