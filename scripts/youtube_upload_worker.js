@@ -192,7 +192,11 @@ app.post('/youtube-upload', async (req, res) => {
         console.error(`[YT-Upload] ❌ Job ${jobId}:`, err.message);
 
         // Reset status in DB
-        await supabase.from('video_jobs').update({ youtube_status: 'none' }).eq('id', jobId).catch(() => { });
+        try {
+            await supabase.from('video_jobs').update({ youtube_status: 'none' }).eq('id', jobId);
+        } catch (dbErr) {
+            console.error('[YT-Upload] DB reset error:', dbErr);
+        }
 
         activeUploads[jobId] = {
             status: 'error',
