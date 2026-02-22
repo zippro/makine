@@ -45,6 +45,19 @@ app.get('/youtube-status/:jobId', (req, res) => {
     res.json(status);
 });
 
+// ─── Reset stuck upload ──────────────────────────────────────────────────────
+
+app.post('/reset/:jobId', (req, res) => {
+    const jobId = req.params.jobId;
+    if (activeUploads[jobId]) {
+        console.log(`[YT-Upload] Manually reset job ${jobId}`);
+        delete activeUploads[jobId];
+        res.json({ success: true, message: `Reset ${jobId}` });
+    } else {
+        res.json({ success: false, message: 'No active upload found for this jobId' });
+    }
+});
+
 // ─── YouTube Upload ──────────────────────────────────────────────────────────
 
 app.post('/youtube-upload', async (req, res) => {
@@ -79,6 +92,7 @@ app.post('/youtube-upload', async (req, res) => {
     // ── Background upload ──
     const startTime = Date.now();
     const supabase = createClient(supabaseUrl, supabaseKey);
+    const UPLOAD_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes max
 
     try {
         // Mark as uploading in DB
@@ -98,22 +112,11 @@ app.post('/youtube-upload', async (req, res) => {
         // Create read stream
         const videoStream = fs.createReadStream(filePath);
 
-        // Track progress
-        let bytesUploaded = 0;
-        videoStream.on('data', (chunk) => {
-            bytesUploaded += chunk.length;
-            const pct = Math.round((bytesUploaded / fileSize) * 100);
-            activeUploads[jobId] = {
-                status: 'uploading',
-                percent: pct,
-                message: `Uploading: ${pct}% (${(bytesUploaded / 1024 / 1024).toFixed(0)}/${(fileSize / 1024 / 1024).toFixed(0)} MB)`
-            };
-        });
+        // Upload to YouTube with REAL progress tracking via onUploadProgress
+        activeUploads[jobId].message = 'Uploading to YouTube...';
 
-        // Upload to YouTube
-        activeUploads[jobId].message = 'Starting YouTube upload...';
-
-        const uploadRes = await youtube.videos.insert({
+        // Wrap in a timeout promise
+        const uploadPromise = youtube.videos.insert({
             part: ['snippet', 'status'],
             requestBody: {
                 snippet: {
@@ -131,7 +134,28 @@ app.post('/youtube-upload', async (req, res) => {
             media: {
                 body: videoStream,
             },
+        }, {
+            // Track ACTUAL bytes sent to YouTube
+            onUploadProgress: (evt) => {
+                if (evt.bytesRead && fileSize) {
+                    const pct = Math.round((evt.bytesRead / fileSize) * 100);
+                    const elapsed = Math.round((Date.now() - startTime) / 1000);
+                    const min = Math.floor(elapsed / 60);
+                    const sec = elapsed % 60;
+                    activeUploads[jobId] = {
+                        status: 'uploading',
+                        percent: Math.min(pct, 99), // Cap at 99% until confirmed
+                        message: `Uploading: ${pct}% (${(evt.bytesRead / 1024 / 1024).toFixed(0)}/${(fileSize / 1024 / 1024).toFixed(0)} MB) (${min}m ${sec}s)`
+                    };
+                }
+            },
         });
+
+        const timeoutPromise = new Promise((_, reject) => {
+            setTimeout(() => reject(new Error('Upload timed out after 30 minutes')), UPLOAD_TIMEOUT_MS);
+        });
+
+        const uploadRes = await Promise.race([uploadPromise, timeoutPromise]);
 
         const youtubeId = uploadRes.data.id;
         const elapsed = Math.round((Date.now() - startTime) / 1000);
