@@ -100,8 +100,15 @@ export default function HomePage() {
     <div className="max-w-5xl mx-auto space-y-10">
       {/* Project Header */}
       <div className="text-center space-y-5 pt-4">
+        {channelStats?.channelThumbnail && (
+          <img
+            src={channelStats.channelThumbnail}
+            alt={currentProject?.name || 'Channel'}
+            className="w-20 h-20 rounded-full border-2 border-border mx-auto shadow-lg"
+          />
+        )}
         <h1 className="text-4xl md:text-5xl font-bold">
-          <span className="gradient-text">{currentProject?.name || 'Makine'}</span>
+          <span className="gradient-text">{channelStats?.channelTitle || currentProject?.name || 'Makine'}</span>
         </h1>
 
         {/* Channel Stats */}
