@@ -8,7 +8,18 @@ import AnimationTypeSelect from '@/components/AnimationTypeSelect';
 import UploadProgress, { UploadStatus } from '@/components/UploadProgress';
 import { useProject } from '@/context/ProjectContext';
 import { MoveAssetModal } from '@/components/MoveAssetModal';
-import { Folder, Edit2, Trash2, Video, Loader2 } from 'lucide-react';
+import { Folder, Edit2, Trash2, Video, Loader2, X, Sparkles, RotateCcw } from 'lucide-react';
+
+interface AnimateModalState {
+    isOpen: boolean;
+    images: any[];
+    prompts: Record<string, string>;
+    generatingIds: Set<string>;
+    generatingAll: boolean;
+    selectedTypeId: string;
+    duration: 5 | 10;
+    submitting: boolean;
+}
 
 export default function UploadImagesPage() {
     const { currentProject } = useProject();
@@ -30,6 +41,117 @@ export default function UploadImagesPage() {
     // Bulk Selection State
     const [selectedImageIds, setSelectedImageIds] = useState<Set<string>>(new Set());
     const [isSelectionMode, setIsSelectionMode] = useState(false);
+
+    // Animate Modal State
+    const [animateModal, setAnimateModal] = useState<AnimateModalState>({
+        isOpen: false, images: [], prompts: {}, generatingIds: new Set(),
+        generatingAll: false, selectedTypeId: 'loop', duration: 10, submitting: false,
+    });
+
+    // --- Animate Modal Helpers ---
+    const openAnimateModal = (images: any[]) => {
+        const defaultTypeId = currentProject?.default_animation_type_id || currentProject?.animation_prompts?.[0]?.id || 'loop';
+        setAnimateModal({
+            isOpen: true,
+            images,
+            prompts: {},
+            generatingIds: new Set(),
+            generatingAll: false,
+            selectedTypeId: defaultTypeId,
+            duration: duration,
+            submitting: false,
+        });
+    };
+
+    const closeAnimateModal = () => {
+        setAnimateModal(prev => ({ ...prev, isOpen: false, images: [], prompts: {}, generatingIds: new Set(), generatingAll: false, submitting: false }));
+    };
+
+    const handleModalPromptChange = (imgId: string, prompt: string) => {
+        setAnimateModal(prev => ({ ...prev, prompts: { ...prev.prompts, [imgId]: prompt } }));
+    };
+
+    const handleModalGenerateOne = async (img: any) => {
+        setAnimateModal(prev => ({ ...prev, generatingIds: new Set(prev.generatingIds).add(img.id) }));
+        try {
+            const res = await fetch('/api/animations/generate-prompt', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ image_url: img.url }),
+            });
+            if (!res.ok) throw new Error('Failed to generate prompt');
+            const data = await res.json();
+            setAnimateModal(prev => ({
+                ...prev,
+                prompts: { ...prev.prompts, [img.id]: data.prompt },
+                generatingIds: (() => { const s = new Set(prev.generatingIds); s.delete(img.id); return s; })(),
+            }));
+        } catch (err) {
+            console.error('Failed to generate prompt for', img.id, err);
+            setAnimateModal(prev => ({
+                ...prev,
+                generatingIds: (() => { const s = new Set(prev.generatingIds); s.delete(img.id); return s; })(),
+            }));
+        }
+    };
+
+    const handleModalGenerateAll = async () => {
+        setAnimateModal(prev => ({ ...prev, generatingAll: true }));
+        for (const img of animateModal.images) {
+            if (!animateModal.prompts[img.id]) {
+                await handleModalGenerateOne(img);
+            }
+        }
+        setAnimateModal(prev => ({ ...prev, generatingAll: false }));
+    };
+
+    const handleModalSubmit = async () => {
+        if (!currentProject) return;
+        setAnimateModal(prev => ({ ...prev, submitting: true }));
+        const supabase = createClient();
+        let queued = 0;
+
+        for (const img of animateModal.images) {
+            try {
+                const { data: animation, error: animError } = await supabase
+                    .from('animations')
+                    .insert({
+                        image_id: img.id,
+                        duration: animateModal.duration,
+                        status: 'queued',
+                        project_id: currentProject.id,
+                        folder: img.folder || '/'
+                    })
+                    .select()
+                    .single();
+
+                if (animError) throw animError;
+
+                const selectedType = currentProject.animation_prompts?.find((p: any) => p.id === animateModal.selectedTypeId);
+                fetch('/api/animations/generate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        animation_id: animation.id,
+                        image_url: img.url,
+                        duration: animateModal.duration,
+                        prompt: animateModal.prompts[img.id] || '',
+                        animation_prompt: selectedType?.prompt || ''
+                    }),
+                }).catch((err: any) => console.error('Webhook trigger error:', err));
+                queued++;
+            } catch (err: any) {
+                console.error('Failed to animate image', img.id, err);
+            }
+        }
+
+        closeAnimateModal();
+        setSelectedImageIds(new Set());
+        setIsSelectionMode(false);
+        if (queued > 0) {
+            alert(`${queued} animation${queued !== 1 ? 's' : ''} queued! View them in the Animations page.`);
+        }
+    };
 
     // ... (fetch logic remains same) ...
 
@@ -666,6 +788,17 @@ export default function UploadImagesPage() {
                                         {selectedImageIds.size === visibleImages.length ? 'Deselect All' : 'Select All'}
                                     </button>
                                     <button
+                                        onClick={() => {
+                                            const imgs = existingImages.filter(img => selectedImageIds.has(img.id));
+                                            if (imgs.length > 0) openAnimateModal(imgs);
+                                        }}
+                                        disabled={selectedImageIds.size === 0}
+                                        className="px-3 py-1.5 text-xs bg-purple-500/20 text-purple-400 hover:bg-purple-500/30 border border-purple-500/20 rounded disabled:opacity-50 flex items-center gap-1"
+                                    >
+                                        <Video className="w-3 h-3" />
+                                        Animate Selected
+                                    </button>
+                                    <button
                                         onClick={handleBulkDelete}
                                         disabled={selectedImageIds.size === 0}
                                         className="px-3 py-1.5 text-xs bg-red-500/20 text-red-400 hover:bg-red-500/30 border border-red-500/20 rounded disabled:opacity-50"
@@ -765,7 +898,11 @@ export default function UploadImagesPage() {
                                     if (!isSelectionMode) handleDragStart(e, img.id);
                                 }}
                                 onClick={() => {
-                                    if (isSelectionMode) toggleSelection(img.id);
+                                    if (isSelectionMode) {
+                                        toggleSelection(img.id);
+                                    } else {
+                                        openAnimateModal([img]);
+                                    }
                                 }}
                                 className={`relative group aspect-square bg-card rounded-xl overflow-hidden border transition-all cursor-pointer
                                     ${isSelectionMode && selectedImageIds.has(img.id) ? 'ring-2 ring-primary border-primary' : 'border-border'}
@@ -795,12 +932,11 @@ export default function UploadImagesPage() {
                                         <button
                                             onClick={(e) => {
                                                 e.stopPropagation();
-                                                handleAnimateExisting(img);
+                                                openAnimateModal([img]);
                                             }}
-                                            disabled={animatingIds.has(img.id)}
-                                            className="text-xs bg-purple-500/20 hover:bg-purple-500/40 text-purple-200 hover:text-white px-2 py-1 rounded backdrop-blur-sm transition-colors border border-purple-500/20 flex items-center gap-1 disabled:opacity-50"
+                                            className="text-xs bg-purple-500/20 hover:bg-purple-500/40 text-purple-200 hover:text-white px-2 py-1 rounded backdrop-blur-sm transition-colors border border-purple-500/20 flex items-center gap-1"
                                         >
-                                            {animatingIds.has(img.id) ? <Loader2 className="w-3 h-3 animate-spin" /> : <Video className="w-3 h-3" />}
+                                            <Video className="w-3 h-3" />
                                             Animate
                                         </button>
                                         <button
@@ -855,6 +991,161 @@ export default function UploadImagesPage() {
                     }
                 }}
             />
+
+            {/* Animate Modal */}
+            {animateModal.isOpen && (
+                <div
+                    className="fixed inset-0 bg-black/80 backdrop-blur-xl z-50 flex items-start justify-center p-4 pt-12 overflow-y-auto animate-in fade-in duration-200"
+                    onClick={closeAnimateModal}
+                >
+                    <div
+                        className="relative w-full max-w-2xl bg-zinc-900 rounded-2xl overflow-hidden shadow-2xl border border-white/10 my-8"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        {/* Header */}
+                        <div className="flex items-center justify-between p-4 border-b border-white/10 sticky top-0 bg-zinc-900 z-10">
+                            <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+                                <Video className="w-5 h-5 text-purple-400" />
+                                Animate {animateModal.images.length === 1 ? 'Image' : `${animateModal.images.length} Images`}
+                            </h3>
+                            <button
+                                onClick={closeAnimateModal}
+                                className="p-1.5 rounded-lg hover:bg-white/10 text-gray-400 hover:text-white transition-colors"
+                            >
+                                <X className="w-5 h-5" />
+                            </button>
+                        </div>
+
+                        {/* Settings Row */}
+                        <div className="px-4 pt-4 flex flex-wrap items-center gap-3">
+                            {/* Duration */}
+                            <div className="flex items-center gap-2 bg-white/5 rounded-xl px-3 py-2 border border-white/10">
+                                <span className="text-xs text-gray-400 font-medium">Duration</span>
+                                <div className="flex gap-1">
+                                    {([5, 10] as const).map(d => (
+                                        <button
+                                            key={d}
+                                            onClick={() => setAnimateModal(prev => ({ ...prev, duration: d }))}
+                                            className={`px-3 py-1 rounded-lg text-xs font-medium transition-all ${animateModal.duration === d
+                                                ? 'bg-primary text-black'
+                                                : 'bg-white/5 text-gray-400 hover:bg-white/10'
+                                                }`}
+                                        >
+                                            {d}s
+                                        </button>
+                                    ))}
+                                </div>
+                            </div>
+
+                            {/* Animation Type */}
+                            {currentProject?.animation_prompts && currentProject.animation_prompts.length > 0 && (
+                                <div className="flex items-center gap-2 bg-white/5 rounded-xl px-3 py-2 border border-white/10">
+                                    <span className="text-xs text-gray-400 font-medium">Type</span>
+                                    <div className="flex flex-wrap gap-1">
+                                        {currentProject.animation_prompts.map((type: any) => (
+                                            <button
+                                                key={type.id}
+                                                onClick={() => setAnimateModal(prev => ({ ...prev, selectedTypeId: type.id }))}
+                                                className={`px-3 py-1 rounded-lg text-xs font-medium transition-all border ${animateModal.selectedTypeId === type.id
+                                                    ? 'bg-purple-500/20 border-purple-500/50 text-purple-300'
+                                                    : 'bg-white/5 border-white/10 text-gray-400 hover:bg-white/10'
+                                                    }`}
+                                            >
+                                                {type.name}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Generate All Prompts */}
+                            {animateModal.images.length > 1 && (
+                                <button
+                                    onClick={handleModalGenerateAll}
+                                    disabled={animateModal.generatingAll}
+                                    className="ml-auto flex items-center gap-1.5 px-3 py-2 rounded-xl bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 border border-purple-500/20 text-xs font-medium transition-all disabled:opacity-50"
+                                >
+                                    {animateModal.generatingAll ? (
+                                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                    ) : (
+                                        <Sparkles className="w-3.5 h-3.5" />
+                                    )}
+                                    {animateModal.generatingAll ? 'Generating...' : 'Generate All Prompts'}
+                                </button>
+                            )}
+                        </div>
+
+                        {/* Image List */}
+                        <div className="p-4 space-y-4 max-h-[60vh] overflow-y-auto">
+                            {animateModal.images.map((img) => (
+                                <div key={img.id} className="flex gap-3 p-3 rounded-xl bg-white/[0.03] border border-white/10">
+                                    {/* Thumbnail */}
+                                    <div className="w-24 h-24 flex-shrink-0 rounded-lg overflow-hidden border border-white/10">
+                                        <img
+                                            src={img.url || '/placeholder.svg'}
+                                            alt={img.filename || 'Image'}
+                                            className="w-full h-full object-cover"
+                                        />
+                                    </div>
+
+                                    {/* Prompt */}
+                                    <div className="flex-1 space-y-2">
+                                        <div className="flex items-center justify-between">
+                                            <span className="text-xs text-gray-500 font-medium truncate max-w-[200px]">{img.filename || 'Image'}</span>
+                                            <button
+                                                onClick={() => handleModalGenerateOne(img)}
+                                                disabled={animateModal.generatingIds.has(img.id)}
+                                                className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 text-[10px] font-medium transition-all disabled:opacity-50"
+                                            >
+                                                {animateModal.generatingIds.has(img.id) ? (
+                                                    <Loader2 className="w-3 h-3 animate-spin" />
+                                                ) : (
+                                                    <Sparkles className="w-3 h-3" />
+                                                )}
+                                                {animateModal.generatingIds.has(img.id) ? 'AI...' : 'AI Generate'}
+                                            </button>
+                                        </div>
+                                        <textarea
+                                            className="w-full bg-zinc-800 border border-zinc-700 rounded-lg p-2 text-xs text-gray-200 placeholder-gray-500 focus:outline-none focus:ring-1 focus:ring-purple-500/50 resize-none"
+                                            placeholder="Describe how to animate this image, or click AI Generate..."
+                                            rows={2}
+                                            value={animateModal.prompts[img.id] || ''}
+                                            onChange={(e) => handleModalPromptChange(img.id, e.target.value)}
+                                        />
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+
+                        {/* Actions */}
+                        <div className="flex items-center gap-3 p-4 border-t border-white/10 bg-white/[0.02] sticky bottom-0">
+                            <button
+                                onClick={closeAnimateModal}
+                                className="flex-1 py-2.5 rounded-lg bg-white/5 hover:bg-white/10 text-gray-300 text-sm font-medium transition-colors"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                onClick={handleModalSubmit}
+                                disabled={animateModal.submitting}
+                                className="flex-1 py-2.5 rounded-lg bg-purple-600 hover:bg-purple-500 text-white text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                            >
+                                {animateModal.submitting ? (
+                                    <Loader2 className="w-4 h-4 animate-spin" />
+                                ) : (
+                                    <Video className="w-4 h-4" />
+                                )}
+                                {animateModal.submitting
+                                    ? 'Processing...'
+                                    : animateModal.images.length === 1
+                                        ? 'Animate'
+                                        : `Animate All (${animateModal.images.length})`
+                                }
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }
