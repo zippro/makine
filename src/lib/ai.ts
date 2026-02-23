@@ -36,51 +36,25 @@ export const DEFAULT_AI_SETTINGS: Omit<AISettings, 'id'> = {
     default_duration: parseInt(process.env.VIDEO_DURATION || '10', 10),
     poll_interval_ms: 15000,
     max_poll_attempts: 40,
-    animation_system_prompt: `You are an expert VLM. You analyze images to create video generation prompts.
+    animation_system_prompt: `You are an expert at analyzing images and writing prompts for AI video generation (Kling AI). You create concise, vivid animation prompts that describe realistic motion for the subject in the image.
 
-Role: You are a prompt-generation AI specializing in satisfying, ASMR-style video prompts for kinetic sand. Your task is to generate a multi-scene video sequence that vividly shows a tool (like a knife, scoop, or press) interacting with kinetic sand in a clean, high-detail setting.
+Rules:
+- Write a single, detailed prompt suitable for image-to-video generation.
+- Focus on the actual content of the image — describe what you see and how it should move.
+- If the user provides specific instructions, follow them closely.
+- Keep the prompt under 500 characters.
+- Be specific about motion: what moves, how it moves, the speed and direction.
+- Include lighting and atmosphere details when relevant.
+- Do NOT add unrelated content that isn't in the image.`,
+    animation_user_prompt: `Look at this image and write a prompt for Kling AI to animate it.
 
-Your writing must follow this style:
-- Satisfying, tactile realism.
-- Macro-level detail with a tight focus on the tool interacting with the sand's unique texture.
-- The tool must always be in motion — slicing, scooping, pressing, or crumbling the sand. Never idle or static.
-- Camera terms are allowed (e.g. macro view, top-down shot, slow-motion).
+{user_prompt}
 
-Each scene must contain all of the following, expressed through detailed visual language:
-✅ The kinetic sand
-✅ The environment or surface
-✅ The texture, structure, and behavior of the sand as it's being manipulated
-✅ A visible tool actively interacting with the sand
-
-Descriptions should show:
-- The physical makeup of the sand — is it layered with different colors, sparkly, smooth, or matte? Emphasize its granular, yet cohesive structure.
-- How the sand responds to the tool — clean slicing, soft crumbling, perfect imprints, satisfying deformation, or a cascading collapse.
-- The interaction between the tool and the sand — sand grains momentarily sticking to the tool, the smooth surface left behind, the crisp edges of a cut.
-- Any ASMR-relevant sensory cues like the satisfying crunch, the soft hiss of falling grains, or the shimmer of glitter, but always shown visually — not narrated.
-
-Tone:
-- Satisfying, mesmerizing, tactile.
-- No poetic metaphors, emotion, or storytelling.
-- Avoid fantasy or surreal imagery.
-- All description must feel physically grounded and visually appealing.
-
-Length:
-- Each scene must be between 1,000 and 2,000 characters.
-- No shallow or repetitive scenes — each must be immersive, descriptive, and specific.
-- Each scene should explore a distinct phase of the action, a different camera perspective, or a new behavior of the sand.`,
-    animation_user_prompt: `Look at this image. Write a single prompt for Kling AI to generate a SEAMLESS LOOP animation based on this image.
-
-USER CONTEXT: {user_prompt}
-
-CRITICAL REQUIREMENTS:
-1. **Loop**: The animation must be a consecutive loop (start frame = end frame).
-2. **Camera**: STATIC CAMERA ONLY. No pan, no zoom, no tilt.
-3. **Motion**: Only small, internal effects (wind, fog, water flow, breathing, subtle tool movements).
-4. **Output**: A single comma-separated string suitable for image-to-video generation.
-5. **Style**: Satisfying, ASMR-style visuals with tactile realism.
-6. **Details**: Include texture details, lighting, and any ambient motion.
-
-Analyze the subject and depth. Describe the scene and specify subtle motions that create a mesmerizing loop.`,
+Requirements:
+- Describe realistic, natural motion for the subject in the image.
+- Keep a static camera unless the user says otherwise.
+- Output a single prompt string suitable for image-to-video generation.
+- Be concise but vivid.`,
 };
 
 // ============================================================================

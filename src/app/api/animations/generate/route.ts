@@ -37,73 +37,76 @@ export async function POST(request: NextRequest) {
             console.error('[Animation Generate] Failed to update status:', updateError);
         }
 
-        // Step 1: Generate animation prompt using VLM
+        // Step 1: Determine animation prompt
+        // If user typed a prompt, use it DIRECTLY (skip GPT-4o).
+        // If no user prompt, use GPT-4o VLM to generate one from the image.
         const settings = await getAISettings();
-        console.log(`[Animation Generate] Generating prompt with ${settings.vlm_model}...`);
-
         let generatedPrompt: string;
-        try {
-            const promptResult = await generateAnimationPrompt({
-                imageUrl: image_url,
-                userPrompt: prompt || '',
-                userPromptTemplate: animation_prompt,
-            });
-            generatedPrompt = promptResult.prompt;
-            console.log(`[Animation Generate] Generated prompt: ${generatedPrompt.substring(0, 100)}...`);
 
-            // Validate VLM response - detect refusal/inability responses
-            const refusalPhrases = [
-                "i'm unable to",
-                "i cannot",
-                "i can't",
-                "unable to analyze",
-                "i don't have the ability",
-                "i am unable",
-                "as an ai",
-                "i'm not able to",
-            ];
-            const lowerPrompt = generatedPrompt.toLowerCase();
-            const isRefusal = refusalPhrases.some(phrase => lowerPrompt.includes(phrase));
+        if (prompt && prompt.trim().length > 0) {
+            // User provided a custom prompt — use it directly for Kling
+            generatedPrompt = prompt.trim();
+            console.log(`[Animation Generate] Using user's prompt directly: ${generatedPrompt.substring(0, 100)}...`);
+        } else {
+            // No user prompt — generate one using GPT-4o VLM
+            console.log(`[Animation Generate] No user prompt, generating with ${settings.vlm_model}...`);
 
-            if (isRefusal) {
-                console.warn(`[Animation Generate] VLM returned a refusal response, retrying...`);
-                // Retry once
-                const retryResult = await generateAnimationPrompt({
+            try {
+                const promptResult = await generateAnimationPrompt({
                     imageUrl: image_url,
-                    userPrompt: prompt || '',
+                    userPrompt: '',
                     userPromptTemplate: animation_prompt,
                 });
-                const retryPrompt = retryResult.prompt;
-                const retryLower = retryPrompt.toLowerCase();
-                const isStillRefusal = refusalPhrases.some(phrase => retryLower.includes(phrase));
+                generatedPrompt = promptResult.prompt;
+                console.log(`[Animation Generate] Generated prompt: ${generatedPrompt.substring(0, 100)}...`);
 
-                if (isStillRefusal) {
-                    // If user provided a prompt, use it directly as fallback
-                    if (prompt && prompt.trim().length > 0) {
-                        console.warn('[Animation Generate] VLM refusal persists, using user prompt as fallback');
-                        generatedPrompt = prompt;
-                    } else {
+                // Validate VLM response - detect refusal/inability responses
+                const refusalPhrases = [
+                    "i'm unable to",
+                    "i cannot",
+                    "i can't",
+                    "unable to analyze",
+                    "i don't have the ability",
+                    "i am unable",
+                    "as an ai",
+                    "i'm not able to",
+                ];
+                const lowerPrompt = generatedPrompt.toLowerCase();
+                const isRefusal = refusalPhrases.some(phrase => lowerPrompt.includes(phrase));
+
+                if (isRefusal) {
+                    console.warn(`[Animation Generate] VLM returned a refusal response, retrying...`);
+                    const retryResult = await generateAnimationPrompt({
+                        imageUrl: image_url,
+                        userPrompt: '',
+                        userPromptTemplate: animation_prompt,
+                    });
+                    const retryPrompt = retryResult.prompt;
+                    const retryLower = retryPrompt.toLowerCase();
+                    const isStillRefusal = refusalPhrases.some(phrase => retryLower.includes(phrase));
+
+                    if (isStillRefusal) {
                         throw new Error('VLM could not analyze the image after 2 attempts. The image URL may not be accessible to OpenAI.');
+                    } else {
+                        generatedPrompt = retryPrompt;
                     }
-                } else {
-                    generatedPrompt = retryPrompt;
                 }
-            }
-        } catch (promptError) {
-            console.error('[Animation Generate] Prompt generation failed:', promptError);
-            await supabase
-                .from('animations')
-                .update({
-                    status: 'error',
-                    error_message: `Prompt generation failed: ${promptError instanceof Error ? promptError.message : 'Unknown error'}`,
-                    updated_at: new Date().toISOString(),
-                })
-                .eq('id', animation_id);
+            } catch (promptError) {
+                console.error('[Animation Generate] Prompt generation failed:', promptError);
+                await supabase
+                    .from('animations')
+                    .update({
+                        status: 'error',
+                        error_message: `Prompt generation failed: ${promptError instanceof Error ? promptError.message : 'Unknown error'}`,
+                        updated_at: new Date().toISOString(),
+                    })
+                    .eq('id', animation_id);
 
-            return NextResponse.json(
-                { error: 'Failed to generate animation prompt' },
-                { status: 500 }
-            );
+                return NextResponse.json(
+                    { error: 'Failed to generate animation prompt' },
+                    { status: 500 }
+                );
+            }
         }
 
         // Save prompt to DB immediately (so it's not lost if later steps fail)
