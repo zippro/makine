@@ -14,18 +14,19 @@ export async function GET(request: NextRequest) {
             return NextResponse.json({ error: 'Project ID required' }, { status: 400 });
         }
 
-        // Auto-cleanup: mark stale 'processing' animations (>15 min) as error
-        const fifteenMinAgo = new Date(Date.now() - 15 * 60 * 1000).toISOString();
+        // Auto-cleanup: mark stale 'processing' animations (>30 min) as error
+        // The check endpoint keeps updated_at fresh for active jobs, so only truly abandoned ones get cleaned up
+        const thirtyMinAgo = new Date(Date.now() - 30 * 60 * 1000).toISOString();
         const { data: staleAnimations } = await supabase
             .from('animations')
             .update({
                 status: 'error',
-                error_message: 'Animation timed out after 15 minutes of processing. Please try reanimating.',
+                error_message: 'Animation timed out after 30 minutes of processing. Please try reanimating.',
                 updated_at: new Date().toISOString(),
             })
             .eq('project_id', projectId)
             .eq('status', 'processing')
-            .lt('updated_at', fifteenMinAgo)
+            .lt('updated_at', thirtyMinAgo)
             .select('id');
 
         if (staleAnimations && staleAnimations.length > 0) {

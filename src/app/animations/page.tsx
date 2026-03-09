@@ -111,6 +111,29 @@ export default function AnimationsPage() {
         }
     }, [currentProject]);
 
+    // Check Fal.ai status for any animations still processing
+    const checkProcessingAnimations = useCallback(async () => {
+        const processingAnims = animations.filter(a => a.status === 'processing');
+        if (processingAnims.length === 0) return;
+
+        console.log(`[Animations] Checking ${processingAnims.length} processing animation(s)...`);
+
+        for (const anim of processingAnims) {
+            try {
+                await fetch('/api/animations/check', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ animation_id: anim.id }),
+                });
+            } catch (err) {
+                console.error(`[Animations] Check failed for ${anim.id}:`, err);
+            }
+        }
+
+        // Refresh animation list to pick up any status changes
+        fetchAnimations();
+    }, [animations, fetchAnimations]);
+
     useEffect(() => {
         if (currentProject) {
             fetchAnimations();
@@ -120,12 +143,19 @@ export default function AnimationsPage() {
                 fetchAnimations();
                 fetchFolders();
             }, 10000);
-            return () => clearInterval(interval);
+            // Check processing animations every 15 seconds (offset from main poll)
+            const checkInterval = setInterval(() => {
+                checkProcessingAnimations();
+            }, 15000);
+            return () => {
+                clearInterval(interval);
+                clearInterval(checkInterval);
+            };
         } else {
             setAnimations([]);
             setLoading(false);
         }
-    }, [fetchAnimations, fetchFolders, currentProject]);
+    }, [fetchAnimations, fetchFolders, checkProcessingAnimations, currentProject]);
 
     // Folder Helpers
     const getFolderContents = (items: Animation[], folder: string) => {

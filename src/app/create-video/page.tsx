@@ -315,6 +315,67 @@ export default function Home() {
     if (data) refreshProjects();
   };
 
+  // Add All functions for picker modals
+  const addAllAnimationsInFolder = async () => {
+    if (!currentProject) return;
+    const folderAnims = getFolderContents(animations, currentAnimFolder).filter(a => a.url);
+    if (folderAnims.length === 0) return;
+
+    const supabase = createClient();
+    const currentAssets = (currentProject as any).template_assets || [];
+    const newAssets = [
+      ...currentAssets,
+      ...folderAnims.map(anim => ({
+        id: crypto.randomUUID(),
+        type: 'animation' as const,
+        url: anim.url,
+        duration: 10,
+        loop_count: (currentProject as any).default_loop_count || 1,
+      })),
+    ];
+
+    const { data } = await supabase
+      .from('projects')
+      .update({ template_assets: newAssets })
+      .eq('id', currentProject.id)
+      .select()
+      .single();
+    if (data) refreshProjects();
+  };
+
+  const addAllImagesInFolder = async () => {
+    if (!currentProject) return;
+    const folderImgs = getFolderContents(projectImages, currentImageFolder);
+    if (folderImgs.length === 0) return;
+
+    const supabase = createClient();
+    const currentAssets = (currentProject as any).template_assets || [];
+    const newAssets = [
+      ...currentAssets,
+      ...folderImgs.map(img => ({
+        id: crypto.randomUUID(),
+        type: 'image' as const,
+        url: img.url,
+        duration: (currentProject as any).default_image_duration || 15,
+      })),
+    ];
+
+    const { data } = await supabase
+      .from('projects')
+      .update({ template_assets: newAssets })
+      .eq('id', currentProject.id)
+      .select()
+      .single();
+    if (data) refreshProjects();
+  };
+
+  const addAllMusicInFolder = () => {
+    const folderTracks = getFolderContents(musicLibrary, currentMusicFolder);
+    const newTracks = folderTracks.filter(t => !selectedMusic.find(m => m.id === t.id));
+    if (newTracks.length === 0) return;
+    setSelectedMusic([...selectedMusic, ...newTracks]);
+  };
+
   const addMusic = (track: MusicTrack) => {
     const exists = selectedMusic.find(m => m.id === track.id);
     if (exists) {
@@ -569,6 +630,14 @@ export default function Home() {
                 </div>
               </div>
               <div className="flex items-center gap-2">
+                {getFolderContents(animations, currentAnimFolder).filter(a => a.url).length > 0 && (
+                  <button
+                    onClick={addAllAnimationsInFolder}
+                    className="px-3 py-1.5 bg-primary/20 text-primary rounded-lg hover:bg-primary/30 text-sm font-medium transition-colors"
+                  >
+                    Add All ({getFolderContents(animations, currentAnimFolder).filter(a => a.url).length})
+                  </button>
+                )}
                 {currentAnimFolder !== '/' && (
                   <button onClick={() => setCurrentAnimFolder(currentAnimFolder.split('/').slice(0, -1).join('/') || '/')} className="p-2 bg-muted/50 rounded-lg hover:bg-muted">
                     Up
@@ -669,6 +738,14 @@ export default function Home() {
                 </div>
               </div>
               <div className="flex items-center gap-2">
+                {getFolderContents(projectImages, currentImageFolder).length > 0 && (
+                  <button
+                    onClick={addAllImagesInFolder}
+                    className="px-3 py-1.5 bg-primary/20 text-primary rounded-lg hover:bg-primary/30 text-sm font-medium transition-colors"
+                  >
+                    Add All ({getFolderContents(projectImages, currentImageFolder).length})
+                  </button>
+                )}
                 {currentImageFolder !== '/' && (
                   <button onClick={() => setCurrentImageFolder(currentImageFolder.split('/').slice(0, -1).join('/') || '/')} className="p-2 bg-muted/50 rounded-lg hover:bg-muted">
                     Up
@@ -784,6 +861,14 @@ export default function Home() {
                 </div>
               </div>
               <div className="flex items-center gap-2">
+                {getFolderContents(musicLibrary, currentMusicFolder).length > 0 && (
+                  <button
+                    onClick={addAllMusicInFolder}
+                    className="px-3 py-1.5 bg-primary/20 text-primary rounded-lg hover:bg-primary/30 text-sm font-medium transition-colors"
+                  >
+                    Add All ({getFolderContents(musicLibrary, currentMusicFolder).filter(t => !selectedMusic.find(m => m.id === t.id)).length})
+                  </button>
+                )}
                 {currentMusicFolder !== '/' && (
                   <button onClick={() => setCurrentMusicFolder(currentMusicFolder.split('/').slice(0, -1).join('/') || '/')} className="p-2 bg-muted/50 rounded-lg hover:bg-muted">
                     Up

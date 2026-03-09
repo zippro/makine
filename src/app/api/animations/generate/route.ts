@@ -3,11 +3,10 @@ import { createAdminClient } from '@/lib/supabase/server';
 import {
     generateAnimationPrompt,
     submitVideoGeneration,
-    pollVideoUntilComplete,
     getAISettings,
 } from '@/lib/ai';
 
-export const maxDuration = 300; // Allow up to 5 minutes for video generation
+export const maxDuration = 60; // Only need time for prompt gen + submission, not polling
 
 // POST /api/animations/generate - Generate animation from image using AI
 export async function POST(request: NextRequest) {
@@ -144,68 +143,24 @@ export async function POST(request: NextRequest) {
             );
         }
 
-        // Step 3: Poll for completion (this runs in the background of the request)
-        // Note: This will block the response until complete, which is fine for Vercel with maxDuration
-        console.log('[Animation Generate] Polling for completion...');
+        // Step 3: Store fal_request_id and return immediately (fire-and-forget)
+        // The frontend will poll /api/animations/check to track progress
+        await supabase
+            .from('animations')
+            .update({
+                fal_request_id: requestId,
+                updated_at: new Date().toISOString(),
+            })
+            .eq('id', animation_id);
 
-        try {
-            const result = await pollVideoUntilComplete(requestId, (status, attempt) => {
-                console.log(`[Animation Generate] Poll ${attempt}: ${status}`);
-            });
+        console.log(`[Animation Generate] Stored request_id ${requestId}, returning immediately.`);
 
-            if (result.status === 'COMPLETED' && result.videoUrl) {
-                console.log(`[Animation Generate] Success! Video URL: ${result.videoUrl}`);
-
-                await supabase
-                    .from('animations')
-                    .update({
-                        status: 'done',
-                        url: result.videoUrl,
-                        prompt: generatedPrompt,
-                        updated_at: new Date().toISOString(),
-                    })
-                    .eq('id', animation_id);
-
-                return NextResponse.json({
-                    success: true,
-                    animation_id,
-                    video_url: result.videoUrl,
-                    prompt: generatedPrompt,
-                });
-            } else {
-                console.error('[Animation Generate] Video generation failed:', result.error);
-
-                await supabase
-                    .from('animations')
-                    .update({
-                        status: 'error',
-                        error_message: result.error || 'Video generation failed',
-                        updated_at: new Date().toISOString(),
-                    })
-                    .eq('id', animation_id);
-
-                return NextResponse.json(
-                    { error: result.error || 'Video generation failed' },
-                    { status: 500 }
-                );
-            }
-        } catch (pollError) {
-            console.error('[Animation Generate] Polling failed:', pollError);
-
-            await supabase
-                .from('animations')
-                .update({
-                    status: 'error',
-                    error_message: `Polling failed: ${pollError instanceof Error ? pollError.message : 'Unknown error'}`,
-                    updated_at: new Date().toISOString(),
-                })
-                .eq('id', animation_id);
-
-            return NextResponse.json(
-                { error: 'Failed to poll video status' },
-                { status: 500 }
-            );
-        }
+        return NextResponse.json({
+            success: true,
+            animation_id,
+            request_id: requestId,
+            prompt: generatedPrompt,
+        });
 
     } catch (error) {
         console.error('Error in POST /api/animations/generate:', error);
